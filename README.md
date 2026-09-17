@@ -7,308 +7,291 @@
   <a href="https://releases.ubuntu.com/"><img src="https://img.shields.io/badge/platform-linux--64-orange.svg" alt="Linux platform"/></a>
 </p>
 
-End-effector **position reach** for the Elephant Robotics **myCobot 280
-JetsonNano** with its adaptive gripper, trained in Isaac Lab with PPO.
+Elephant Robotics **myCobot 280 JetsonNano**와 adaptive gripper를 Isaac Lab에서
+PPO로 학습시킨다. 엔드이펙터 **위치 추종**(reach)과 **큐브 집어 옮기기**(lift)
+두 task가 들어 있다.
 
-The robot comes from the vendor's own `mycobot_ros2` description. That file
-cannot be imported as it stands — it is not well-formed XML, every joint
-declares a zero velocity limit, no link has any inertia, and the gripper is a
-five-joint `<mimic>` cluster. Repairing it is a real part of this repository and
-it happens in one documented place: **`assets/robots/mycobot_urdf.py`**. The
-vendor checkout is never modified.
+로봇은 벤더가 배포하는 `mycobot_ros2` description에서 가져온다. 그 파일은 있는
+그대로는 import되지 않는다 — XML이 well-formed가 아니고, 모든 joint가 velocity
+limit을 0으로 선언하며, inertia를 가진 link가 하나도 없고, gripper는 `<mimic>`
+다섯 개로 엮인 클러스터다. 이 복구는 저장소의 실질적인 일부이고, 문서화된 한
+곳에서만 일어난다 — **`assets/robots/mycobot_urdf.py`**. 벤더 checkout은 절대
+수정하지 않는다.
 
-## Two tasks
+## 두 개의 task
 
-| task id | what it does | gripper |
+| task id | 하는 일 | gripper |
 | --- | --- | --- |
-| `Isaac-Reach-MyCobot280JN-v0` | end-effector **position reach** | welded open |
-| `Isaac-Lift-Cube-MyCobot280JN-v0` | **pick up a 32 mm cube** and carry it to a goal | actuated |
+| `Isaac-Reach-MyCobot280JN-v0` | 엔드이펙터 **위치 추종** | 열린 상태로 용접 |
+| `Isaac-Lift-Cube-MyCobot280JN-v0` | **25 mm 큐브**를 집어 목표 지점으로 운반 | sliding 평행 조 |
 
-The two share the arm, the URDF repair and the kinematics; they differ in what
-the gripper is allowed to do, which turns out to change almost everything about
-the physics setup. See [The lift task](#the-lift-task).
+팔과 URDF 복구, 기구학은 둘이 공유한다. 다른 것은 gripper에 무엇을 허용하느냐
+하나뿐인데, 그 하나가 물리 설정의 거의 전부를 바꾼다. → [lift task](#lift-task)
 
-## Scope — reach
+## 범위 — reach
 
-Position reach in simulation. The policy sees its own joint state and a goal
-**position**, and emits joint-position offsets. No grasping, no contact, no
-orientation tracking, no hardware.
+시뮬레이션 안에서의 위치 추종. 정책은 자기 joint 상태와 목표 **위치**를 보고
+joint 위치 오프셋을 낸다. 파지도, 접촉도, 자세(orientation) 추종도, 실기도 없다.
 
-The gripper is **welded open** and merged into the flange: it contributes its
-mass and geometry and nothing else. See `GRIPPER_FIXED_AT` for why that beats
-keeping five mimic joints alive for a task that never closes them.
+gripper는 **열린 상태로 용접**되어 flange에 병합된다. 질량과 형상만 기여하고 그
+외에는 아무것도 하지 않는다. 한 번도 닫지 않는 task에서 mimic joint 다섯 개를
+살려 두는 것보다 이쪽이 나은 이유는 `GRIPPER_FIXED_AT`에 적혀 있다.
 
-## Quick start
+## 빠른 시작
 
 ```bash
-# 1. the vendor robot description, as a sibling checkout
+# 1. 벤더 로봇 description을 sibling checkout으로
 git clone --depth 1 https://github.com/elephantrobotics/mycobot_ros2.git ../mycobot_ros2
-#    (or point $MYCOBOT_ROS2_DIR at an existing one)
+#    (이미 있다면 $MYCOBOT_ROS2_DIR 로 가리켜도 된다)
 
-# 2. the environment — Isaac Sim 5.1 and Isaac Lab 2.3.2 come in as pip deps
+# 2. 환경 구성 — Isaac Sim 5.1과 Isaac Lab 2.3.2가 pip 의존성으로 들어온다
 uv sync
 
-# 3. Isaac Sim asks to accept the NVIDIA Omniverse licence on first launch, and
-#    the prompt has no stdin under uv. Accept it once, deliberately:
+# 3. Isaac Sim은 첫 실행에서 NVIDIA Omniverse 라이선스 동의를 묻는데, uv 아래에서는
+#    그 프롬프트에 stdin이 없다. 한 번, 의도를 갖고 수락한다:
 export OMNI_KIT_ACCEPT_EULA=YES
 
-# 4. check the robot and the task before spending a GPU-hour on them
-uv run pytest                   # ~0.3 s, no GPU: URDF repair + task geometry
-uv run workspace_sweep          # ~10 s, no GPU: is every goal actually reachable?
-uv run list_envs                # registered task ids
+# 4. GPU 시간을 쓰기 전에 로봇과 task를 먼저 검사한다
+uv run pytest                   # ~0.3 s, GPU 불필요: URDF 복구 + task 기하
+uv run workspace_sweep          # ~10 s, GPU 불필요: 모든 목표가 실제로 도달 가능한가
+uv run list_envs                # 등록된 task id 목록
 
-# 5. see the environment run before training it. Pass --max_steps, or these
-#    loop until you interrupt them.
+# 5. 학습 전에 환경이 도는 것을 눈으로 본다. --max_steps 를 주지 않으면
+#    중단할 때까지 계속 돈다.
 uv run zero_agent   --task Isaac-Reach-MyCobot280JN-v0 --num_envs 16 --headless --max_steps 200
 uv run random_agent --task Isaac-Reach-MyCobot280JN-v0 --num_envs 16 --headless --max_steps 200
 
-# 6. train
+# 6. 학습
 uv run train --task Isaac-Reach-MyCobot280JN-v0 --headless
 
-# 7. watch a checkpoint
+# 7. checkpoint 재생
 uv run play --task Isaac-Reach-MyCobot280JN-Play-v0 --num_envs 16
 ```
 
-`uv run train` writes to `logs/rsl_rl/reach_mycobot_280_jn/<timestamp>/`, saving
-a checkpoint every 50 iterations and dumping the resolved env and agent configs
-into `params/`. `uv run play` picks up the latest run by default; `--load_run`
-and `--checkpoint` select another.
+`uv run train`은 `logs/rsl_rl/reach_mycobot_280_jn/<timestamp>/`에 기록하며, 50
+iteration마다 checkpoint를 저장하고 해석된 env·agent 설정을 `params/`에 덤프한다.
+`uv run play`는 기본적으로 가장 최근 run을 집는다. 다른 것을 쓰려면 `--load_run`과
+`--checkpoint`를 준다.
 
-A smoke run before the real thing:
+본 학습 전 smoke run:
 
 ```bash
 uv run train --task Isaac-Reach-MyCobot280JN-v0 --headless --num_envs 64 --max_iterations 5
 ```
 
-Watch **`Episode_Reward/end_effector_position_success`** — the fraction of
-control steps spent within `SUCCESS_THRESHOLD` (20 mm) of the goal. It is the
-one number that says whether the policy is working.
+볼 것은 **`Episode_Reward/end_effector_position_success`** — 목표에서
+`SUCCESS_THRESHOLD`(20 mm) 이내에 머문 제어 스텝의 비율이다. 정책이 동작하는지를
+말해 주는 단 하나의 숫자다.
 
-### Troubleshooting
+### 문제 해결
 
-**Setup appears to hang for minutes with no output.** That is the renderer, not
-the URDF conversion — converting this robot takes about 1.6 s. Isaac Sim's first
-RTX pipeline compile ran past 16 minutes on this machine, and
-`SimulationContext.step()` renders by default even under `--headless`. In your
-own physics-only scripts, step with `sim.step(render=False)`. The scripts here
-already do the right thing.
+**아무 출력 없이 몇 분간 멈춘 것처럼 보인다.** URDF 변환이 아니라 렌더러다. 이
+로봇의 변환은 약 1.6 s면 끝난다. 이 머신에서 Isaac Sim의 첫 RTX 파이프라인
+컴파일은 16분을 넘겼고, `SimulationContext.step()`은 `--headless`에서도 기본적으로
+렌더링한다. 직접 물리 전용 스크립트를 쓴다면 `sim.step(render=False)`로 스텝하라.
+여기 있는 스크립트들은 이미 그렇게 한다.
 
-## The robot
+## 로봇
 
 | | |
 | --- | --- |
-| source | `mycobot_ros2/mycobot_description/urdf/mycobot_280_jn/mycobot_280_jn_adaptive_gripper.urdf` |
-| DOF | 6 revolute, `joint2_to_joint1` … `joint6output_to_joint6` |
-| root link | `joint1` — fixed base, and the frame goals are expressed in |
-| tracked body | `joint6_flange` — the tool flange, not a TCP |
-| mass | 0.968 kg = 0.85 kg arm + 0.118 kg gripper. PhysX reports `joint6_flange` as **0.138 kg**, because the welded gripper merges into it (0.020 + 0.118). |
-| reach | 302 mm horizontal at the flange; `z` ∈ [−103, +447] mm |
+| 출처 | `mycobot_ros2/mycobot_description/urdf/mycobot_280_jn/mycobot_280_jn_adaptive_gripper.urdf` |
+| DOF | revolute 6개, `joint2_to_joint1` … `joint6output_to_joint6` |
+| root link | `joint1` — 고정 베이스이자 목표가 표현되는 프레임 |
+| 추종 body | `joint6_flange` — TCP가 아니라 공구 flange |
+| 질량 | 0.968 kg = 팔 0.85 kg + gripper 0.118 kg. PhysX는 `joint6_flange`를 **0.138 kg**로 보고하는데, 용접된 gripper가 여기에 병합되기 때문이다(0.020 + 0.118). |
+| 도달 범위 | flange 기준 수평 302 mm, `z` ∈ [−103, +447] mm |
 
-The vendor names its **links** `joint1` … `joint6`. That is confusing and it is
-theirs — renaming would put this repository and `mycobot_ros2` into permanent
-disagreement. Links are `jointN`, joints are `jointN_to_jointM`.
+벤더는 자기 **link**들을 `joint1` … `joint6`이라고 부른다. 헷갈리지만 그쪽 것이다.
+이름을 바꾸면 이 저장소와 `mycobot_ros2`가 영구히 어긋난다. link는 `jointN`,
+joint는 `jointN_to_jointM`이다.
 
-### What the URDF repair fixes
+### URDF 복구가 고치는 것
 
-All four were confirmed against the checkout, not assumed:
+넷 다 가정이 아니라 checkout에 대고 확인한 것이다:
 
-| defect | effect if unrepaired | fix |
+| 결함 | 고치지 않으면 | 조치 |
 | --- | --- | --- |
-| `lower = "-2.932"1 upper = …` | not well-formed XML; every parser stops at line 89 | text-level repair before the parse |
-| `velocity="0"` on all 13 joints | imports as a PhysX joint that cannot move | 2.0944 rad/s (120 °/s, spec sheet) |
-| no `<inertial>` anywhere; no `<collision>` on the 6 arm links | zero-mass articulation | explicit inertials + `collision_from_visuals` |
-| 5 `<mimic>` joints on the gripper | only one of the five binds (see below) | welded (reach) / re-targeted to adjacent pairs (lift) |
+| `lower = "-2.932"1 upper = …` | well-formed XML이 아니라 모든 파서가 89번 줄에서 멈춘다 | 파싱 전 텍스트 수준 복구 |
+| 13개 joint 전부 `velocity="0"` | 움직일 수 없는 PhysX joint로 import된다 | 2.0944 rad/s (120 °/s, 스펙시트) |
+| `<inertial>`이 아예 없고, 팔 6개 link에 `<collision>`도 없음 | 질량 0인 articulation | 명시적 inertial + `collision_from_visuals` |
+| gripper의 `<mimic>` joint 5개 | 다섯 중 하나만 바인딩된다 (아래 참조) | 용접(reach) / sliding 평행 조로 교체(lift) |
 
-Plus an `<?xml version="1.1"?>` declaration, a stray `<xacro:property>`, and
-`package://` mesh URIs that urdfdom resolves only under ROS. The repaired file
-lands in `generated/` (git-ignored — it is derived, not authored) and is rebuilt
-whenever the vendor file is newer.
+여기에 `<?xml version="1.1"?>` 선언, 남아 있는 `<xacro:property>`, 그리고 urdfdom이
+ROS 아래에서만 해석하는 `package://` mesh URI도 함께 처리한다. 복구된 파일은
+`generated/`에 놓이고(git-ignored — 저작물이 아니라 파생물이다), 벤더 파일이 더
+새로우면 다시 만들어진다.
 
-## The task
+## reach task
 
-`Isaac-Reach-MyCobot280JN-v0`, a manager-based `ManagerBasedRLEnv`.
+`Isaac-Reach-MyCobot280JN-v0`, manager 기반 `ManagerBasedRLEnv`.
 
 | | |
 | --- | --- |
-| observation | 21 = 6 joint pos + 6 joint vel + 3 goal position + 6 last action |
-| action | 6 joint-position offsets from the home posture, scale 0.5 rad |
-| control | 60 Hz policy over 120 Hz physics (`decimation=2`) |
-| episode | 12 s, goal resampled every 3 s → four goals per episode |
-| goal box | 160 × 240 × 160 mm centred at (0.16, 0, 0.20) m in `joint1` |
-| reward | −0.2·‖e‖ + 0.1·(1 − tanh(‖e‖/0.05)) + 0.05·[‖e‖ ≤ 0.02], minus action-rate and joint-velocity penalties |
-| termination | time-out only |
-| success | flange within 20 mm of the goal |
+| 관측 | 21 = joint 위치 6 + joint 속도 6 + 목표 위치 3 + 직전 action 6 |
+| action | 홈 자세 기준 joint 위치 오프셋 6개, scale 0.5 rad |
+| 제어 | 120 Hz 물리 위의 60 Hz 정책 (`decimation=2`) |
+| 에피소드 | 12 s, 3 s마다 목표 재샘플링 → 에피소드당 목표 4개 |
+| 목표 박스 | `joint1` 기준 (0.16, 0, 0.20) m 중심의 160 × 240 × 160 mm |
+| 보상 | −0.2·‖e‖ + 0.1·(1 − tanh(‖e‖/0.05)) + 0.05·[‖e‖ ≤ 0.02], 여기에 action-rate·joint-velocity 페널티 |
+| 종료 | 시간 초과만 |
+| 성공 | flange가 목표에서 20 mm 이내 |
 
-**Position only.** Upstream's orientation-tracking reward is deliberately
-absent: on a 6-DOF arm with a 280 mm reach, a position the arm reaches easily
-can be one it reaches in only a single wrist configuration, so a pose reward
-would spend most of its gradient on goals that are position-feasible and
-pose-infeasible. `RewardsCfg` documents the three changes needed to turn it
-back on — and why the third one is not optional.
+**위치만 본다.** 상류(upstream)의 자세 추종 보상은 의도적으로 뺐다. 도달 범위
+280 mm의 6-DOF 팔에서는 쉽게 도달하는 위치라도 손목 자세가 단 하나로 정해지는
+경우가 있어, 자세 보상을 켜면 gradient의 대부분을 "위치는 가능하지만 자세는
+불가능한" 목표에 쓰게 된다. 다시 켜는 데 필요한 세 가지 변경과, 그중 세 번째가
+왜 선택 사항이 아닌지는 `RewardsCfg`에 적혀 있다.
 
-**The goal box is derived, not guessed.** `uv run workspace_sweep` re-derives
-it: it loads the same repaired URDF Isaac Lab converts, runs bounded
-least-squares IK against the declared joint limits, and checks the eight corners
-explicitly as well as the interior. Corners matter — an earlier box passed 300
-uniformly-sampled goals while one of its corners was 9.3 mm out of reach, because
-uniform sampling essentially never visits the corner of a 3-box.
+**목표 박스는 추측이 아니라 유도된 것이다.** `uv run workspace_sweep`이 이를 다시
+유도한다. Isaac Lab이 변환하는 것과 같은 복구 URDF를 읽고, 선언된 joint limit에
+대해 bounded least-squares IK를 돌리며, 내부뿐 아니라 여덟 꼭짓점을 명시적으로
+검사한다. 꼭짓점이 중요하다 — 이전 박스는 균일 샘플링한 목표 300개를 통과했지만
+한 꼭짓점이 9.3 mm 모자랐다. 균일 샘플링은 3차원 박스의 모서리를 사실상 방문하지
+않기 때문이다.
 
-## Results
+## reach 결과
 
-Measured on an RTX 5090, 4096 environments, seed 0. A full 1500-iteration run
-(1004 s) to find where the task actually converges:
+RTX 5090, 4096 환경, seed 0에서 측정. task가 실제로 어디서 수렴하는지 보려고
+1500 iteration 전 구간(1004 s)을 돌렸다:
 
-| iteration | mean tracking error | control steps within 20 mm |
+| iteration | 평균 추종 오차 | 20 mm 이내 제어 스텝 |
 | --- | --- | --- |
 | 150 | 5.0 mm | 92.4% |
 | **400** | **2.9 mm** | **93.0%** |
 | 750 | 6.8 mm | 88.0% |
 | 1499 | 4.9 mm | 88.6% |
 
-**It peaks at iteration 400 and then degrades.** `Mean action noise std`
-collapses from 1.0 to 0.04 over the run: past roughly iteration 450 the policy
-is effectively deterministic, stops exploring and drifts. `max_iterations` is
-therefore set to **500**, not the 1500 that was first configured — training
-longer costs 15 minutes and makes the policy slightly worse.
+**iteration 400에서 정점을 찍고 그 뒤로 나빠진다.** `Mean action noise std`가 run
+동안 1.0에서 0.04로 무너진다. 대략 iteration 450을 넘기면 정책은 사실상
+결정론적이 되어 탐색을 멈추고 표류한다. 그래서 `max_iterations`는 처음 설정했던
+1500이 아니라 **500**이다. 더 오래 돌리면 15분을 더 쓰고 정책은 조금 더 나빠진다.
 
-Two consequences worth knowing:
+알아 둘 결과가 둘 있다:
 
-* **The last checkpoint is not the best one.** `uv run play` loads the latest by
-  default; pass `--checkpoint <absolute path to model_400.pt>` to load another.
-  Note `--checkpoint` takes a *file path*, not a run-relative name.
-* At 500 iterations the run takes about 5½ minutes.
+* **마지막 checkpoint가 최선이 아니다.** `uv run play`는 기본적으로 최신 것을
+  읽는다. 다른 것을 쓰려면 `--checkpoint <model_400.pt의 절대 경로>`를 준다.
+  `--checkpoint`는 run 상대 이름이 아니라 *파일 경로*를 받는다.
+* 500 iteration이면 약 5분 30초 걸린다.
 
-`Episode_Reward/end_effector_position_success` divided by that term's 0.05
-weight reads directly as the fraction of control steps on target — 0.0465 means
-93%. The 7% that miss are mostly the moments just after a goal resamples, while
-the arm is still traversing.
+`Episode_Reward/end_effector_position_success`를 해당 항의 가중치 0.05로 나누면
+목표에 머문 제어 스텝 비율이 그대로 읽힌다 — 0.0465는 93%다. 빗나가는 7%는 대부분
+목표가 재샘플링된 직후, 팔이 아직 이동 중인 순간이다.
 
-**The one number that mattered.** `JOINT_ACTION_SCALE` started at 0.15, reasoned
-down from upstream's 0.5 because this arm is a third the size of a UR10. That
-reasoning is wrong: the action is in *joint* space, and joint excursion does not
-shrink with arm size — only Cartesian distance does. At 0.15 the goal box
-demanded actions of 9.8σ at the 95th percentile, and training improved to 39 mm
-and then *regressed* to 56 mm as exploration noise decayed. At 0.5 it converges
-monotonically to 3 mm. The constant's docstring carries the derivation.
+**중요했던 단 하나의 숫자.** `JOINT_ACTION_SCALE`은 "이 팔이 UR10의 3분의 1
+크기니까"라는 근거로 상류의 0.5에서 0.15로 낮춰 시작했다. 그 근거가 틀렸다.
+action은 *joint* 공간에 있고, joint 변위는 팔 크기에 따라 줄지 않는다. 줄어드는
+것은 직교 좌표 거리뿐이다. 0.15에서는 목표 박스가 95 백분위에서 9.8σ의 action을
+요구했고, 학습은 39 mm까지 좋아졌다가 탐색 노이즈가 감쇠하면서 56 mm로 *퇴행*했다.
+0.5에서는 3 mm까지 단조롭게 수렴한다. 유도 과정은 이 상수의 docstring에 있다.
 
-Success is a **reward term, not a termination**. The goal resamples inside the
-episode, so the task is to track, not to arrive; and a non-time-out termination
-on a task whose dominant term is a negative distance penalty would make ending
-the episode early a reward in itself.
+성공은 **종료 조건이 아니라 보상 항**이다. 목표가 에피소드 안에서 재샘플링되므로
+task는 도착이 아니라 추종이고, 지배적인 항이 음의 거리 페널티인 task에서 시간
+초과가 아닌 종료를 두면 에피소드를 일찍 끝내는 것 자체가 보상이 되어 버린다.
 
-## The lift task
+## lift task
 
-`Isaac-Lift-Cube-MyCobot280JN-v0`. The policy sees its joint state, the cube's
-position and a goal position, and emits six joint-position offsets plus one
-binary open/close.
+`Isaac-Lift-Cube-MyCobot280JN-v0`. 정책은 joint 상태와 큐브 위치, 목표 위치를 보고
+joint 위치 오프셋 6개와 이진 열기/닫기 1개를 낸다.
 
 | | |
 | --- | --- |
-| observation | 27 = 7 joint pos + 7 joint vel + 3 cube pos + 3 goal pos + 7 last action |
-| action | 6 joint offsets (scale 0.5) + 1 binary gripper |
-| control | 50 Hz policy over 100 Hz physics |
-| episode | 5 s, goal resampled every 5 s |
-| cube | 32 mm, 20 g, friction 1.5 / 1.2 |
-| jaw | opens to 50.2 mm, closes to 24.0 mm |
-| lifted | cube centre above 60 mm (it rests at 17 mm) |
+| 관측 | 27 = joint 위치 7 + joint 속도 7 + 큐브 위치 3 + 목표 위치 3 + 직전 action 7 |
+| action | joint 오프셋 6 (scale 0.5) + 이진 gripper 1 |
+| 제어 | 100 Hz 물리 위의 50 Hz 정책 |
+| 에피소드 | 5 s, 5 s마다 목표 재샘플링 |
+| 큐브 | 25 mm, 20 g, 마찰 1.5 / 1.2 |
+| 조 개폐 | 열림 45.6 mm, 닫힘 19.4 mm (datasheet 파지 범위 20–45 mm) |
+| 들림 판정 | 큐브 중심이 60 mm 위 (놓인 상태는 13.5 mm) |
 
-### Getting the gripper to grip
+### 그리퍼를 실제로 집게 만들기
 
-This took four measured fixes, and the order they were found in is the useful
-part — each one looked like the whole problem until it wasn't.
+최종 형상은 벤더의 회전 링크가 아니라 **sliding 평행 조**다. `gripper="parallel"`
+빌드는 다음을 만든다:
 
-**1. The mimic cluster.** The vendor gripper is a four-bar per side:
-`gripper_base → {knuckle, parallel link}` and `knuckle → fingertip`, with the
-fingertip coupled at ×−1.0 so the pad stays parallel as the knuckle swings.
+* **prismatic finger 2개.** `PARALLEL_FINGER_JOINTS`가 편측 13.1 mm씩 미끄러지고,
+  하나의 이진 action이 둘을 (부호를 뒤집어) 함께 명령한다. 조는 45.6 mm에서
+  19.4 mm까지 닫히는데, 이는 Elephant Robotics가 공개한 20–45 mm 파지 범위에
+  맞춘 값이다. gripper 모델에서 datasheet가 뒷받침하는 유일한 숫자이므로
+  테스트로 고정해 두었다.
+* **대칭 box pad 2개.** `gripper_left3`/`gripper_right3`의 fingertip mesh를
+  6 × 26 × 22 mm 박스로 교체하고 link 원점에서 12.3 mm 안쪽으로 넣었다. 시각과
+  충돌 형상이 **같은** 박스다. 둘이 다르면 보이지 않는 형상이 물체를 집게 되고,
+  이전 버전이 큐브를 하우징에 짓이기는 것처럼 보였던 원인이 그것이었다.
+* **접근축 스윕 0 mm.** 열림에서 닫힘까지 pad의 접근 방향 범위는 35.4–61.4 mm로
+  불변이다. 파지점 `JAW_OFFSET_IN_GRIPPER_BASE`는 그 중앙인 48.4 mm이고, 이는
+  gripper 몸체가 닿는 거리 바깥이다.
+* **측면 파지.** pad는 조 축을 기준으로 z ∈ [−11, +11] mm에 대칭으로 놓인다.
+  접근은 수평이고 pad는 수직 평면에 선다.
+* **로봇 전체 collider 2개.** 이 pad 둘이 전부다. `collision_from_visuals`를 끈
+  결과인데, 켜 두면 팔이 장식용 visual mesh에서 뜬 convex hull을 달고 다니고,
+  파지에 필요한 낮은 자세에서 그것들이 바닥을 누른다. 가만히 서 있기만 해도
+  joint 오차가 **0.19 rad**(조 기준 약 30 mm, 큐브보다 크다) 쌓였다. 끄면
+  **0.005 rad**로 떨어진다.
 
-PhysX **does** have mimic joints (`PhysxMimicJointAPI`), and Isaac Lab's
-`convert_mimic_joints_to_normal_joints=True` is what makes the importer create
-them — the name is misleading, so it was checked rather than trusted. But
-articulation mimic joints only bind **parent-child adjacent** joints. Importing
-the vendor's five tags verbatim produced five mimic prims of which exactly *one*
-had its reference bound; the other four named `gripper_controller` from a sibling
-branch and silently did nothing, and the right finger then swung to 1.10 rad
-against a 0.7 rad limit.
+마지막 항목의 대가는 분명히 적어 둘 만하다: **팔의 link들이 지면과 서로를 통과할
+수 있다.** task가 이를 보상하지도, 금지하지도 않는다.
 
-`gripper="mimic"` re-expresses the couplings against adjacent joints: each
-fingertip mimics **its own knuckle**, and the two knuckles are commanded
-(mirrored) by one binary action. The pads — the parts that touch the object — are
-therefore held parallel by a real constraint. The two dangling parallel links are
-the open end of a loop URDF cannot express, so they stay welded.
+### 여기까지 온 과정
 
-**2. Top-down grasping is impossible.** The pads hang about 15 mm below the jaw
-centre, so centring the jaw on a cube resting on a surface drives them through
-it. Measured, not guessed. The task uses a **side grasp** instead — approach
-horizontal, pads in a vertical plane, measured span z ∈ [5.5, 27.8] mm for a
-35 mm cube, entirely above the ground.
+처음 "동작하던" gripper는 허구였다 — 큐브가 집힌 게 아니라 하우징에 끼어 있었다.
+그걸 정직하게 고치자 task는 네 번의 run 동안 *학습 불가능*해졌다. 각 run이 실제
+결함을 하나씩 분리해 냈고, 발견된 순서가 이 기록의 핵심이다.
 
-**3. The vendor collision meshes cannot close on anything.** `gripper_left1`
-spans 59 mm and `gripper_right1` 13 mm, and their convex hulls sit at very
-different distances from the centreline — 13.6 mm on the left, 37.9 mm on the
-right. A cube placed at the jaw centre is struck by one pad and missed by the
-other. The URDF repair replaces both with **symmetric box pads** (6 × 24 × 20 mm,
-inset 16 mm from the link origin) and strips every other gripper collider.
+| 수정 | 증거 | 결과 |
+| --- | --- | --- |
+| PhysX mimic을 인접 joint로 재표적 | 벤더의 `<mimic>` 5개 중 4개가 빈 reference로 import; 오른쪽 손가락이 한계 0.7 rad를 넘어 1.10 rad까지 스윙 | 결합 비율 오차 0.6% 이내 |
+| 파지점을 하우징 밖으로 이동 | fingertip 원점 중점이 body에서 16.8 mm인데 body는 13.9 mm까지 도달 — 32 mm 큐브가 13 mm 겹침 | 짓이기지 않고 집게 됨 |
+| lift 전용 홈 자세 | reach 홈에서 측면 파지까지 **6.3σ**의 action이 필요 | 45 mm 고원에 머물던 조가 4–7 mm까지 내려옴 |
+| `grasping_object` 보상 항 | 학습된 정책 probing: 2000개 샘플 *전부*에서 gripper 명령이 양수(열기). 한 번도 닫지 않았으므로 들어올림을 본 적이 없다 | 제어 스텝의 75%에서 조가 닫힘 |
+| **sliding 손가락** | knuckle이 회전하는 동안 pad가 접근 방향으로 **15.2 mm 전진**해 큐브를 14–21 mm 밀어냄. pad를 어디에 붙여도 동일 | 0% → 94% |
 
-**4. The arm's own hulls were fighting the floor.** With
-`collision_from_visuals=True` the arm carries convex hulls off its decorative
-visual meshes, and at the low poses a grasp needs they press into the ground:
-the arm held **0.19 rad** of joint error while merely standing still, which is
-~30 mm at the jaw — larger than the cube. Turning it off drops that to
-**0.005 rad**. The lift config therefore has exactly two colliders on the whole
-robot: the grip pads.
+`PhysxMimicJointAPI`는 실재하고, Isaac Lab의
+`convert_mimic_joints_to_normal_joints=True`가 importer로 하여금 그것을 만들게
+한다(이름이 오해를 부르므로 믿지 않고 확인했다). 다만 articulation mimic joint는
+**parent-child로 인접한** joint만 묶는다. 벤더의 태그 다섯 개를 그대로 import하면
+mimic prim 다섯 개가 생기지만 reference가 잡힌 것은 정확히 *하나*이고, 나머지
+넷은 sibling branch의 `gripper_controller`를 가리키며 조용히 아무 일도 하지 않는다.
 
-With all four in place, a scripted grasp lifts the cube ~98 mm from every
-approach offset between 5 and 25 mm.
+마지막 행이 이야기의 전부다. 회전 링크는 pad를 *평행하게* 유지하지만 *정지시키지는*
+못하고, 그 호가 무는 대상을 끌고 간다. sliding 손가락에는 호가 없다. 크기 제한도
+함께 사라졌다 — scripted grasp가 20, 22, 25, 28, 32, 36, 40 mm 큐브를 모두 잡는다.
+회전 조는 34–42 mm에서만 됐다.
 
-The cost of (4) is worth stating plainly: **the arm's links can pass through the
-ground plane and through each other.** Nothing in the task rewards that, and
-nothing forbids it.
+### lift 결과
 
-### Lift results
+4096 환경, seed 0, 1500 iteration을 483 s(8분)에:
 
-4096 environments, seed 0, 1500 iterations in 483 s (8 min):
-
-| iteration | cube lifted | cube at goal | mean reward |
+| iteration | 큐브 들림 | 큐브 목표 도달 | 평균 보상 |
 | --- | --- | --- | --- |
 | 250 | 81.3% | 61.7% | 129 |
 | 500 | 90.9% | 74.5% | 153 |
 | 1000 | 93.0% | 81.0% | 163 |
 | 1499 | **93.5%** | **84.2%** | 158 |
 
-Read those as fractions of control steps: the cube spends 94% of the time above
-60 mm and 84% of it near the goal. The curve does not turn over, so the last
-checkpoint is usable.
+제어 스텝의 비율로 읽으면 된다. 큐브는 시간의 94%를 60 mm 위에서, 84%를 목표
+근처에서 보낸다. 곡선이 꺾이지 않으므로 마지막 checkpoint를 그대로 쓸 수 있다.
 
-**What it took.** The first working gripper was a fiction — the cube was being
-wedged into the housing, not pinched — and fixing that honestly made the task
-*unlearnable* for four successive runs. Each run isolated one real defect:
-
-| fix | evidence | result |
-| --- | --- | --- |
-| PhysX mimic, retargeted to adjacent joints | 4 of the vendor's 5 `<mimic>` tags imported with an empty reference; the right finger swung to 1.10 rad against a 0.7 rad limit | couplings exact to 0.6% |
-| grasp point moved out of the housing | origin midpoint sits 16.8 mm from a body that reaches 13.9 mm — a 32 mm cube overlapped it by 13 mm | cube pinched, not wedged |
-| lift-specific home pose | side grasp needed **6.3σ** of action from the reach home | jaw reached 4–7 mm, from a 45 mm plateau |
-| `grasping_object` reward | probing the policy: gripper command positive — open — at *every* one of 2000 samples; it never closed, so never saw a lift | jaw closes 75% of steps |
-| **sliding fingers** | pads swept **15.2 mm forward** as the knuckles rotated, shoving the cube 14–21 mm; invariant to pad placement | 0% → 94% |
-
-The last one is the whole story. A rotating linkage keeps its pads *parallel* but
-not *stationary*, and the arc drags whatever it closes on. Sliding fingers have
-no arc. It also removed the size limit: scripted grasps hold 20, 22, 25, 28, 32,
-36 and 40 mm cubes, where the rotating jaw only worked from 34 to 42 mm.
-
-## Layout
+## 구조
 
 ```
 src/arc_mycobot/
 ├── assets/robots/
-│   ├── mycobot_urdf.py        # the vendor-URDF repair + every structural constant
-│   └── mycobot_280.py         # MYCOBOT_280_JN_CFG: spawn, actuators, gains
-├── kinematics/urdf_fk.py      # numpy FK off the repaired URDF; no Isaac import
+│   ├── mycobot_urdf.py        # 벤더 URDF 복구 + 모든 구조 상수
+│   └── mycobot_280.py         # MYCOBOT_280_JN_CFG / _LIFT_CFG: spawn, actuator, gain
+├── kinematics/urdf_fk.py      # 복구 URDF 기반 numpy FK; Isaac import 없음
 ├── tasks/reach/
-│   ├── reach_env_cfg.py       # robot-agnostic base (scene, MDP, 60 Hz)
-│   ├── mdp/                   # framework terms + success indicator + goal obs
+│   ├── reach_env_cfg.py       # 로봇 무관 베이스 (scene, MDP, 60 Hz)
+│   ├── mdp/                   # 프레임워크 항 + 성공 지표 + 목표 관측
 │   └── config/mycobot/
-│       ├── geometry.py        # goal box and length scales — Isaac-free on purpose
+│       ├── geometry.py        # 목표 박스와 길이 스케일 — 일부러 Isaac 비의존
+│       ├── joint_pos_env_cfg.py
+│       └── agents/rsl_rl_ppo_cfg.py
+├── tasks/lift/
+│   ├── lift_env_cfg.py        # 로봇 무관 베이스 (큐브, 목표, 보상 사다리, 50 Hz)
+│   ├── mdp/rewards.py         # grasping_object — 보상 사다리의 "닫기" 단
+│   └── config/mycobot/
+│       ├── geometry.py        # 큐브·스폰·목표·파지점 — 역시 Isaac 비의존
 │       ├── joint_pos_env_cfg.py
 │       └── agents/rsl_rl_ppo_cfg.py
 └── scripts/
@@ -317,38 +300,36 @@ src/arc_mycobot/
     └── tools/workspace_sweep.py
 ```
 
-Two boundaries are load-bearing:
+구조를 지탱하는 경계가 둘 있다:
 
-* **Gym registration is lazy.** `config/mycobot/__init__.py` registers *string*
-  entry points and `agents/__init__.py` imports nothing, so `import
-  arc_mycobot.tasks` costs milliseconds and needs no GPU.
-  `tests/test_task_registration.py` asserts that `isaaclab` stays out of
-  `sys.modules`.
-* **The geometric constants avoid Isaac Lab.** `geometry.py` and
-  `mycobot_urdf.py` import no `isaaclab`, which is what lets `workspace_sweep`
-  and the whole test suite run on CPU in under ten seconds instead of paying an
-  Omniverse Kit bootstrap to read six floats.
+* **gym 등록은 지연된다.** `config/mycobot/__init__.py`는 *문자열* entry point를
+  등록하고 `agents/__init__.py`는 아무것도 import하지 않는다. 그래서
+  `import arc_mycobot.tasks`는 밀리초면 끝나고 GPU가 필요 없다.
+  `tests/test_task_registration.py`가 `isaaclab`이 `sys.modules`에 들어오지 않음을
+  단언한다.
+* **기하 상수는 Isaac Lab을 피한다.** `geometry.py`와 `mycobot_urdf.py`는
+  `isaaclab`을 import하지 않는다. 덕분에 `workspace_sweep`과 테스트 전체가 float
+  여섯 개를 읽자고 Omniverse Kit 부트스트랩 비용을 치르는 대신 CPU에서 10초 안에
+  돈다.
 
-## What is not verified
+## 검증하지 않은 것
 
-Marked `TODO(unverified)` in place, and worth knowing before trusting any number
-that comes out of this:
+코드에 `TODO(unverified)`로 표시해 두었다. 여기서 나오는 숫자를 믿기 전에 알아 둘
+것들이다:
 
-* **Link masses and inertias.** Elephant Robotics publish a total mass (850 g),
-  a payload (250 g) and a working radius; they publish no per-link breakdown and
-  no inertia tensors. The masses here are distributed by the usual taper for a
-  serial arm and normalized to the published total; the inertias are isotropic
-  solid-sphere approximations at a 30 mm radius of gyration. Right order of
-  magnitude, right total — not good enough for torque-level work.
-* **Joint stiffness, damping and torque limits.** No servo gains are published.
-  The values here were chosen, not measured — what *was* measured is their
-  effect: holding the home posture, the worst steady-state gravity sag is
-  32.8 mrad at the shoulder, which puts the flange 8.8 mm below where forward
-  kinematics says it should be. That 8.8 mm is the whole discrepancy between
-  this repository's FK and its simulation.
-* **Joint velocity limit.** 120 °/s is the spec sheet's single figure for the
-  whole arm, applied to all six joints.
+* **link별 질량과 관성.** Elephant Robotics는 총 질량(850 g), 가반하중(250 g),
+  작업 반경을 공개하지만 link별 분배도 관성 텐서도 공개하지 않는다. 여기 질량은
+  직렬 팔의 통상적인 테이퍼로 분배해 공개된 총합에 맞춘 것이고, 관성은 회전 반경
+  30 mm의 등방 구 근사다. 자릿수와 총합은 맞지만 토크 수준의 작업에는 부족하다.
+* **joint 강성·감쇠·토크 한계.** 서보 게인은 공개되어 있지 않다. 여기 값들은
+  측정한 것이 아니라 고른 것이다. 측정한 것은 그 *효과* 쪽이다 — 홈 자세를 유지할
+  때 최악의 정상상태 중력 처짐이 어깨에서 32.8 mrad이고, 그만큼 flange가 순기구학이
+  말하는 위치보다 8.8 mm 아래에 놓인다. 이 저장소의 FK와 시뮬레이션 사이의 불일치는
+  그 8.8 mm가 전부다.
+* **joint 속도 한계.** 120 °/s는 팔 전체에 대한 스펙시트의 단일 수치이고, 그것을
+  여섯 joint 모두에 적용했다.
+* **gripper 강성·감쇠.** 파지력만 datasheet의 150 g 기준에 맞췄다.
+* **목표 미도달 16%의 원인 분해.** 놓친 것인지 접근에 실패한 것인지 구분하지 않았다.
 
-None of this blocks a simulation-only reach task — the policy learns against
-whatever dynamics it is given. All of it would have to be measured before any
-sim-to-real transfer.
+시뮬레이션 전용 task에는 이 중 무엇도 걸림돌이 되지 않는다 — 정책은 주어진 동역학이
+무엇이든 그에 맞춰 학습한다. 다만 sim-to-real 전이 전에는 전부 실측해야 한다.
