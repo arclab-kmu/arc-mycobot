@@ -1,0 +1,111 @@
+[project]
+name = "arc-mycobot"
+version = "0.1.0"
+description = "Isaac Lab reach and cube-lift tasks for the Elephant Robotics myCobot 280 JetsonNano with adaptive gripper."
+readme = "README.md"
+requires-python = "==3.11.*"
+dependencies = [
+  "isaaclab[all,isaacsim]==2.3.2.post1",
+  "torch==2.7.0",
+  "torchvision==0.22.0",
+  # scripts/tools/workspace_sweep.py only: bounded least-squares IK. That script
+  # imports neither isaaclab nor torch, so it runs on CPU in a few seconds.
+  "scipy>=1.14",
+]
+
+[dependency-groups]
+dev = [
+  "pre-commit>=4.6.0",
+  "pyright>=1.1.410",
+  "pytest>=9.0.3",
+  "ruff>=0.15.15",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["logs", "outputs", "generated", "_isaac_sim", ".venv"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["arc_mycobot"]
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # pyflakes
+  "I",   # isort (Sort import)
+  "UP",  # pyupgrade
+  "SIM", # flake8-simplify
+  "RET", # flake8-return
+]
+ignore = [
+  "E402",   # module-level import not at top: every Isaac script must launch the app first
+  "RET504",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"**/mdp/__init__.py" = ["F401", "F403"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.pyright]
+include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
+exclude = [
+  "**/__pycache__",
+  "**/_isaac_sim",
+  "logs",
+  "outputs",
+  "generated",
+  ".venv",
+  "src/arc_mycobot/scripts",
+  "**/mdp/__init__.py",
+]
+typeCheckingMode = "basic"
+pythonVersion = "3.11"
+pythonPlatform = "Linux"
+reportMissingImports = "none"
+reportMissingModuleSource = "none"
+reportGeneralTypeIssues = "none"
+reportAttributeAccessIssue = "none"
+reportOptionalMemberAccess = "warning"
+reportPrivateUsage = "warning"
+
+[tool.pytest.ini_options]
+addopts = "-v"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+markers = [
+  "isaacsim_ci: environment tests that launch the Isaac Sim app (slow, need a GPU)",
+]
+
+[project.scripts]
+train = "arc_mycobot.scripts.rsl_rl.train:cli"
+play = "arc_mycobot.scripts.rsl_rl.play:cli"
+list_envs = "arc_mycobot.scripts.environments.list_envs:cli"
+random_agent = "arc_mycobot.scripts.environments.random_agent:cli"
+zero_agent = "arc_mycobot.scripts.environments.zero_agent:cli"
+build_urdf = "arc_mycobot.assets.robots.mycobot_urdf:build_mycobot_urdf"
+workspace_sweep = "arc_mycobot.scripts.tools.workspace_sweep:cli"
+
+[tool.uv]
+index-strategy = "unsafe-best-match"
+
+[[tool.uv.index]]
+url = "https://pypi.nvidia.com"
+
+[[tool.uv.index]]
+url = "https://download.pytorch.org/whl/cu128"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arc_mycobot"]
