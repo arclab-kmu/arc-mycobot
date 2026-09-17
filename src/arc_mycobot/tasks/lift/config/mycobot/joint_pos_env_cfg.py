@@ -5,11 +5,13 @@
 """myCobot 280 JN wiring for the cube-lift task.
 
 The gripper is *actuated* here, which is the whole difference from the reach
-task. See ``ACTUATED_GRIPPER_JOINTS`` and ``_PAD_INSET`` in
+task. See ``PARALLEL_FINGER_JOINTS`` and ``_PAD_INSET`` in
 ``assets/robots/mycobot_urdf.py`` for what that took: the vendor's five-joint
-mimic cluster becomes four independent joints driven from one binary command,
-and the fingertips get box grip pads because the vendor's collision meshes are
-too asymmetric to close on anything.
+mimic cluster is replaced by two sliding fingers driven from one binary command,
+and they get box grip pads because the vendor's collision meshes are too
+asymmetric to close on anything. The rotating linkage it replaces held its pads
+parallel but swept them 15.2 mm along the approach, which shoved the cube out of
+the jaw and kept the task at 0% for four training runs.
 """
 
 import isaaclab.sim as sim_utils
@@ -100,9 +102,10 @@ class MyCobotCubeLiftEnvCfg(LiftEnvCfg):
             scale=JOINT_ACTION_SCALE,
             use_default_offset=True,
         )
-        # One binary command drives the two knuckles. The fingertips are not
-        # commanded at all -- PhysX mimic constraints hold them parallel, which
-        # is the vendor linkage's actual job. See MYCOBOT_GRIPPER_COMMAND_JOINTS.
+        # One binary command drives both sliding fingers, mirrored. Nothing
+        # follows by constraint: the two are siblings off gripper_base, which is
+        # precisely the case PhysX mimic cannot bind, so commanding both is what
+        # makes the coupling exact. See MYCOBOT_GRIPPER_COMMAND_JOINTS.
         self.actions.gripper_action = mdp.BinaryJointPositionActionCfg(
             asset_name="robot",
             joint_names=MYCOBOT_GRIPPER_COMMAND_JOINTS,

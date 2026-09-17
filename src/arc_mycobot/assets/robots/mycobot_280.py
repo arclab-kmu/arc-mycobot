@@ -299,10 +299,13 @@ have to press with 0.13 N, so even the published figure has a 10x margin.
 MYCOBOT_280_JN_LIFT_CFG = ArticulationCfg(
     spawn=sim_utils.UrdfFileCfg(
         asset_path=str(build_mycobot_urdf("parallel")),
-        # The flag's name is misleading and it was checked rather than trusted:
-        # True makes the importer parse <mimic> into PhysxMimicJointAPI prims
-        # (measured: 2 created, both with their reference bound), False leaves
-        # the joints free. It does *not* mean "flatten the coupling away".
+        # Inert on this asset: the parallel build carries no <mimic> at all, so
+        # there is nothing for the importer to convert (pinned by
+        # test_parallel_build_carries_no_mimic). Kept because the flag's name is
+        # misleading and the finding is worth not re-deriving -- True makes the
+        # importer parse <mimic> into PhysxMimicJointAPI prims, False leaves the
+        # joints free; it does *not* mean "flatten the coupling away". It matters
+        # again the moment this asset_path is pointed at the "mimic" build.
         convert_mimic_joints_to_normal_joints=True,
         fix_base=True,
         root_link_name=MYCOBOT_ROOT_LINK,
