@@ -56,6 +56,11 @@ uv run pytest                   # ~0.3 s, GPU 불필요: URDF 복구 + task 기�
 uv run workspace_sweep          # ~10 s, GPU 불필요: 모든 목표가 실제로 도달 가능한가
 uv run list_envs                # 등록된 task id 목록
 
+#    pytest가 "43 passed"가 아니라 "5 passed, 38 skipped"로 끝나면 1단계가 안 된
+#    것이다. 로봇을 건드리는 테스트는 벤더 checkout이 없으면 실패가 아니라
+#    skip되므로, 초록색으로 보여도 통과가 아니다. workspace_sweep이 정확한
+#    경로와 clone 명령을 알려 준다.
+
 # 5. 학습 전에 환경이 도는 것을 눈으로 본다. --max_steps 를 주지 않으면
 #    중단할 때까지 계속 돈다.
 uv run zero_agent   --task Isaac-Reach-MyCobot280JN-v0 --num_envs 16 --headless --max_steps 200
@@ -118,9 +123,14 @@ joint는 `jointN_to_jointM`이다.
 | gripper의 `<mimic>` joint 5개 | 다섯 중 하나만 바인딩된다 (아래 참조) | 용접(reach) / sliding 평행 조로 교체(lift) |
 
 여기에 `<?xml version="1.1"?>` 선언, 남아 있는 `<xacro:property>`, 그리고 urdfdom이
-ROS 아래에서만 해석하는 `package://` mesh URI도 함께 처리한다. 복구된 파일은
-`generated/`에 놓이고(git-ignored — 저작물이 아니라 파생물이다), 벤더 파일이 더
-새로우면 다시 만들어진다.
+ROS 아래에서만 해석하는 `package://` mesh URI도 함께 처리한다.
+
+복구된 파일은 `generated/`에 놓인다. **이 디렉터리는 git에 올리지 않고, 올려서도
+안 된다.** `package://`를 풀면서 mesh 경로가 절대 경로로 바뀌기 때문에
+(`/home/<사용자>/manipulation/mycobot_ros2/...`) 커밋해 봐야 다른 머신에서는
+존재하지 않는 경로를 가리킨다. 저작물이 아니라 파생물이고, 필요할 때 알아서
+만들어진다 — `build_mycobot_urdf()`가 디렉터리까지 생성하며, 벤더 파일이 출력물보다
+새로우면 다시 만든다. 따라서 clone 직후 `generated/`가 없는 것이 정상이다.
 
 ## reach task
 
