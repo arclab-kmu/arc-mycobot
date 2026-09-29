@@ -394,6 +394,36 @@ uv run --extra yolo visual_align_eval --task Isaac-Visual-Align-YOLO-Hand-MyCobo
 실물 카메라의 검출 지연과 팔 구동은 아직 검증하지 않았다. 따라서
 이 정책의 실물 손 추종 성공을 뜻하지 않는다.
 
+### Hand policy preview from a file or Hugging Face
+
+The trained RSL-RL checkpoint is a separate file; it is not committed to Git.
+`hand_policy_predict` loads the deterministic actor directly, detects only
+Open Images `Human hand` class 267 with the frozen `yolov8n-oiv7.pt` detector,
+and prints the five policy actions. A missing detection is reported as
+`detected=0`. This command does not send commands to a physical arm.
+
+```bash
+uv sync --extra yolo
+uv run --extra yolo hand_policy_predict \
+  --checkpoint /path/to/arc-mycobot-yolo-hand-policy.pt \
+  --image /path/to/camera-frame.jpg \
+  --angles-deg 0 0 0 0 0 -45
+```
+
+After uploading that checkpoint to a Hugging Face **model** repository, replace
+`--checkpoint` with `--hf-repo username/repository`. The default Hub filename is
+`arc-mycobot-yolo-hand-policy.pt`; use `--hf-file` if you rename it. `--hf-revision`
+can pin a revision. The Hub library uses its normal local cache and credentials.
+For one frame from a local webcam, use `--camera-index 0` instead of `--image`.
+Supply the measured angles with `--angles-deg`, and optionally measured joint
+velocities with `--velocities-deg-s` and the last executed action with
+`--previous-action`. Without the optional inputs the one-frame preview assumes
+zero velocities and no previous action. The printed simulation targets are
+computed with a 0.25 rad action scale and J6 fixed at -45 degrees; they have
+not been validated as safe commands for the physical robot. The reusable
+`HandAlignPolicy.predict` API accepts one uint8 HWC RGB frame and the same
+joint state in radians.
+
 ## 구조
 
 ```

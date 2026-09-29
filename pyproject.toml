@@ -94,10 +94,12 @@ zero_agent = "arc_mycobot.scripts.environments.zero_agent:cli"
 build_urdf = "arc_mycobot.assets.robots.mycobot_urdf:build_mycobot_urdf"
 workspace_sweep = "arc_mycobot.scripts.tools.workspace_sweep:cli"
 visual_align_eval = "arc_mycobot.scripts.tools.visual_align_eval:cli"
+hand_policy_predict = "arc_mycobot.scripts.tools.hand_policy_predict:cli"
 
 [project.optional-dependencies]
 yolo = [
     "ultralytics>=8.3,<9",
+    "huggingface-hub>=1,<2",
 ]
 
 [tool.uv]
