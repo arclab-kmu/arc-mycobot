@@ -26,11 +26,13 @@ python -c 'import sys, torch, torchvision, cv2, ultralytics, pymycobot; print(sy
 python -m deploy.run --checkpoint outputs/arc-mycobot-yolo-hand-policy.pt --image src/arc_mycobot/assets/targets/hand_palm.jpg --device cuda:0
 ```
 
-실제 카메라에서는 먼저 preview만 실행한다. 로봇 연결은 Jetson UART `/dev/ttyTHS1` @ 1 Mbaud, 카메라는 `/dev/video0`이 기본이다. 관절 읽기·손 검출·프레임 방향·`observation_age_s`를 확인한다.
+실제 카메라에서는 먼저 preview만 실행한다. 로봇 연결은 Jetson UART `/dev/ttyTHS1` @ 1 Mbaud, 카메라는 `/dev/video0`이 기본이며 USB 카메라는 V4L2 backend로 연다. 시작 시 YOLO/CUDA를 팔 연결 전에 한 번 예열한다. 관절 읽기·손 검출·프레임 방향·`observation_age_s`를 확인한다.
 
 ```bash
 python -m deploy.run --device cuda:0 --max-frames 50
 ```
+
+첫 출력의 `warmup_s`는 명령 전 모델 준비 시간이다. 각 프레임의 `camera_read_s`, `inference_s`, `observation_age_s`로 지연 구간을 확인한다. `observation_age_s`가 1초를 넘으면 `--execute`는 명령 없이 멈춘다. 특히 매 프레임의 `inference_s`가 1초에 가깝거나 더 길면 관측 유효기간을 늘려 우회하지 말고 read-only preview의 수치를 먼저 확인한다. SSH 환경의 GDK 표시 오류가 남더라도 영상 창은 이 명령에서 사용하지 않는다. 카메라 자체가 열리지 않으면 `/dev/video0`의 존재·권한과 다른 프로세스 점유를 확인한다.
 
 실기 명령을 내릴 때는 팔을 **수동으로** J1–J5 ≈ 0°, J6 ≈ -45°의 충돌 없는 시작 자세에 놓고 실행한다. 코드는 자동으로 홈 자세로 이동하지 않는다. 처음에는 짧게 관찰한다.
 

@@ -107,6 +107,15 @@ class HandPolicyRuntime:
         if self.detector.names.get(HAND_CLASS) != "Human hand":
             raise ValueError("YOLO weights lack Open Images class 267 (Human hand)")
 
+    def warmup(self):
+        """Pay the first YOLO/CUDA inference cost before opening the robot."""
+        self.predict(
+            torch.zeros((IMAGE_SIZE, IMAGE_SIZE, 3), dtype=torch.uint8),
+            HOME_DEG,
+            [0.0] * 6,
+            [0.0] * 5,
+        )
+
     @torch.no_grad()
     def predict(self, rgb, angles_deg, velocities_deg_s, previous_action):
         """Run one uint8 HWC RGB frame; angles and velocities are J1..J6."""

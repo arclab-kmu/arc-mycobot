@@ -65,11 +65,13 @@ def run_offline(args, runtime):
 
 
 def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSession, camera_factory=None):
-    if camera_factory is None:
-        camera_factory = cv2.VideoCapture
-    camera = camera_factory(args.camera)
+    warmup_started = time.monotonic()
+    runtime.warmup()
+    print(json.dumps({"warmup_s": round(time.monotonic() - warmup_started, 3)}), flush=True)
+    camera = cv2.VideoCapture(args.camera, cv2.CAP_V4L2) if camera_factory is None else camera_factory(args.camera)
     if not camera.isOpened():
-        raise RuntimeError(f"cannot open camera {args.camera}")
+        camera.release()
+        raise RuntimeError(f"cannot open V4L2 camera {args.camera}")
     camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     config = arm_config_type(
         read_only=not args.execute,
@@ -88,6 +90,16 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
             try:
                 for index in range(args.max_frames or 2**63):
                     cycle_start = time.monotonic()
+                    status = arm.read_status()
+                    if args.execute and (status is None or not status.is_normal):
+                        raise UnsafeTarget(
+                            f"arm status is not normal: {'unavailable' if status is None else status.describe()}"
+                        )
+                    capture_started = time.monotonic()
+                    ok, bgr = camera.read()
+                    if not ok:
+                        raise RuntimeError("camera read failed")
+                    frame_at = time.monotonic()
                     reading = arm.read_joints(retry_s=0.2)
                     feedback_at = time.monotonic()
                     if args.execute and last_angles is None:
@@ -95,22 +107,20 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
                     dt = 0.0 if last_feedback_at is None else feedback_at - last_feedback_at
                     velocities = joint_velocities(reading.angles, last_angles, dt)
                     last_angles, last_feedback_at = list(reading.angles), feedback_at
-                    status = arm.read_status()
-                    if args.execute and (status is None or not status.is_normal):
-                        raise UnsafeTarget(
-                            f"arm status is not normal: {'unavailable' if status is None else status.describe()}"
-                        )
-                    ok, bgr = camera.read()
-                    if not ok:
-                        raise RuntimeError("camera read failed")
-                    frame_at = time.monotonic()
                     rgb = rgb_frame(bgr, args.rotate, args.flip_x, args.flip_y)
+                    inference_started = time.monotonic()
                     prediction = runtime.predict(rgb, reading.angles, velocities, previous_action)
                     age = time.monotonic() - min(feedback_at, frame_at)
+                    camera_read_s = frame_at - capture_started
+                    inference_s = time.monotonic() - inference_started
                     target = None
                     if args.execute:
                         if age > MAX_OBSERVATION_AGE_S:
-                            raise UnsafeTarget(f"observation is stale ({age:.3f} s)")
+                            raise UnsafeTarget(
+                                f"observation is stale ({age:.3f} s; "
+                                f"camera read {camera_read_s:.3f} s, inference {inference_s:.3f} s); "
+                                "no command sent; check read-only preview timing"
+                            )
                         target = plan_target(prediction, reading.angles)
                         arm.gate.open("fresh hand detection and joint feedback")
                         try:
@@ -126,6 +136,8 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
                                 "policy_action": prediction.action,
                                 "sent_target_deg": target,
                                 "observation_age_s": round(age, 3),
+                                "camera_read_s": round(camera_read_s, 3),
+                                "inference_s": round(inference_s, 3),
                                 "status": None if status is None else status.describe(),
                             }
                         ),

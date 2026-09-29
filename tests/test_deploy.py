@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import cv2
 import numpy as np
 import pytest
 import torch
@@ -111,6 +112,10 @@ class FakeRobot:
 class FakeRuntime:
     def __init__(self, detected=True):
         self.detected = detected
+        self.warmups = 0
+
+    def warmup(self):
+        self.warmups += 1
 
     def predict(self, rgb, angles, velocities, previous_action):
         assert rgb.shape == (4, 4, 3)
@@ -145,16 +150,34 @@ def test_deployment_guards_and_feedback_step():
 
 
 def test_preview_never_sends_and_execute_halts_after_command():
-    run_camera(args(False), FakeRuntime(), lambda **kw: SimpleNamespace(**kw), FakeArm, FakeCamera)
+    preview_runtime = FakeRuntime()
+    run_camera(args(False), preview_runtime, lambda **kw: SimpleNamespace(**kw), FakeArm, FakeCamera)
+    assert preview_runtime.warmups == 1
     arm = FakeArm.last
     assert arm is not None
     assert arm.config.read_only
     assert arm.commands == []
-    run_camera(args(True), FakeRuntime(), lambda **kw: SimpleNamespace(**kw), FakeArm, FakeCamera)
+    execute_runtime = FakeRuntime()
+    run_camera(args(True), execute_runtime, lambda **kw: SimpleNamespace(**kw), FakeArm, FakeCamera)
+    assert execute_runtime.warmups == 1
     arm = FakeArm.last
     assert arm is not None
     assert arm.commands == [[1.0, 0.0, 0.0, 0.0, 0.0, -45.0]]
     assert arm.halts == ["deployment ended"]
+
+
+def test_usb_camera_uses_v4l2_backend(monkeypatch):
+    import deploy.run as deploy_run
+
+    opened = []
+
+    def capture(source, backend):
+        opened.append((source, backend))
+        return FakeCamera(source)
+
+    monkeypatch.setattr(deploy_run.cv2, "VideoCapture", capture)
+    run_camera(args(False), FakeRuntime(), lambda **kw: SimpleNamespace(**kw), FakeArm)
+    assert opened == [("/dev/video0", cv2.CAP_V4L2)]
 
 
 def test_lost_hand_sends_no_command_and_stops_arm():
@@ -162,6 +185,22 @@ def test_lost_hand_sends_no_command_and_stops_arm():
         run_camera(args(True), FakeRuntime(False), lambda **kw: SimpleNamespace(**kw), FakeArm, FakeCamera)
     arm = FakeArm.last
     assert arm is not None
+    assert arm.commands == []
+    assert arm.halts == ["deployment ended"]
+
+
+def test_slow_inference_sends_no_command_and_reports_timing(monkeypatch):
+    import deploy.run as deploy_run
+
+    class SlowRuntime(FakeRuntime):
+        def predict(self, rgb, angles, velocities, previous_action):
+            time.sleep(0.02)
+            return super().predict(rgb, angles, velocities, previous_action)
+
+    monkeypatch.setattr(deploy_run, "MAX_OBSERVATION_AGE_S", 0.001)
+    with pytest.raises(UnsafeTarget, match="inference .*no command sent"):
+        run_camera(args(True), SlowRuntime(), lambda **kw: SimpleNamespace(**kw), FakeArm, FakeCamera)
+    arm = FakeArm.last
     assert arm.commands == []
     assert arm.halts == ["deployment ended"]
 
