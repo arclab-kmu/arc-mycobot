@@ -4,6 +4,7 @@ import ast
 import builtins
 import sys
 import time
+import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,6 +14,7 @@ import pytest
 import torch
 from deploy.arm import ArmConfig, ArmSession, require_pymycobot
 from deploy.controller import UnsafeTarget, check_start, plan_target
+from deploy.preview import BrowserPreview
 from deploy.run import cli, rgb_frame, run_camera
 from deploy.runtime import Prediction, box_from_results, verify_checkpoint
 
@@ -131,6 +133,7 @@ def args(execute):
         port="/dev/ttyTHS1",
         baud=1000000,
         max_frames=1,
+        web_preview_port=None,
         rotate=0,
         flip_x=False,
         flip_y=False,
@@ -178,6 +181,23 @@ def test_usb_camera_uses_v4l2_backend(monkeypatch):
     monkeypatch.setattr(deploy_run.cv2, "VideoCapture", capture)
     run_camera(args(False), FakeRuntime(), lambda **kw: SimpleNamespace(**kw), FakeArm)
     assert opened == [("/dev/video0", cv2.CAP_V4L2)]
+
+
+def test_browser_preview_serves_current_yolo_box():
+    preview = BrowserPreview(0)
+    url = preview.start()
+    try:
+        prediction = Prediction((0.0, 0.0, 0.5, 0.5, 1.0), (0.0,) * 5, (0.0,) * 5 + (-45.0,))
+        preview.publish(torch.zeros((320, 320, 3), dtype=torch.uint8), prediction, False, 0.2)
+        with urllib.request.urlopen(url) as response:
+            assert b"myCobot hand preview" in response.read()
+        with urllib.request.urlopen(url + "/frame.jpg") as response:
+            assert response.headers["Content-Type"] == "image/jpeg"
+            frame = cv2.imdecode(np.frombuffer(response.read(), dtype=np.uint8), cv2.IMREAD_COLOR)
+        assert frame.shape == (320, 320, 3)
+        assert frame[80, 80, 1] > 150  # green corner of the Human hand box
+    finally:
+        preview.close()
 
 
 def test_lost_hand_sends_no_command_and_stops_arm():
@@ -349,6 +369,6 @@ def test_rgb_square_crop_and_class_filter():
 
 
 def test_deploy_source_parses_as_python_38():
-    for name in ("runtime.py", "controller.py", "arm.py", "run.py"):
+    for name in ("runtime.py", "controller.py", "arm.py", "preview.py", "run.py"):
         source = (Path(__file__).resolve().parents[1] / "deploy" / name).read_text()
         ast.parse(source, filename=name, feature_version=(3, 8))

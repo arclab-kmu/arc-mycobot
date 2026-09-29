@@ -12,6 +12,7 @@ import torch
 
 from deploy.arm import ArmConfig, ArmSession, require_pymycobot
 from deploy.controller import Limits, UnsafeTarget, check_start, plan_target
+from deploy.preview import BrowserPreview
 from deploy.runtime import CHECKPOINT_NAME, HF_REPO, HF_REVISION, HandPolicyRuntime, resolve_checkpoint
 
 PERIOD_S = 0.2
@@ -85,7 +86,10 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
     last_angles = None
     last_feedback_at = None
     previous_action = [0.0] * 5
+    preview = BrowserPreview(args.web_preview_port) if args.web_preview_port is not None else None
     try:
+        if preview is not None:
+            print(f"YOLO browser preview: {preview.start()}", flush=True)
         with arm_session_type(config) as arm:
             try:
                 for index in range(args.max_frames or 2**63):
@@ -113,6 +117,9 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
                     age = time.monotonic() - min(feedback_at, frame_at)
                     camera_read_s = frame_at - capture_started
                     inference_s = time.monotonic() - inference_started
+                    if preview is not None:
+                        preview.publish(rgb, prediction, args.execute, age)
+                        age = time.monotonic() - min(feedback_at, frame_at)
                     target = None
                     if args.execute:
                         if age > MAX_OBSERVATION_AGE_S:
@@ -133,6 +140,7 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
                             {
                                 "frame": index,
                                 "box": prediction.box,
+                                "angles_deg": reading.angles,
                                 "policy_action": prediction.action,
                                 "sent_target_deg": target,
                                 "observation_age_s": round(age, 3),
@@ -153,6 +161,8 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
                     arm.halt("deployment ended")
     finally:
         camera.release()
+        if preview is not None:
+            preview.close()
 
 
 def cli():
@@ -172,6 +182,7 @@ def cli():
         "--angles-deg", type=float, nargs=6, default=[0, 0, 0, 0, 0, -45], help="offline-image pose only"
     )
     parser.add_argument("--max-frames", type=int, help="stop after this many camera frames")
+    parser.add_argument("--web-preview-port", type=int, help="show YOLO boxes in a local browser on this port")
     parser.add_argument("--rotate", type=int, choices=(0, 90, 180, 270), default=0)
     parser.add_argument("--flip-x", action="store_true")
     parser.add_argument("--flip-y", action="store_true")
@@ -180,6 +191,10 @@ def cli():
         parser.error("--image and --execute cannot be combined")
     if args.max_frames is not None and args.max_frames < 1:
         parser.error("--max-frames must be positive")
+    if args.web_preview_port is not None and not 1 <= args.web_preview_port <= 65535:
+        parser.error("--web-preview-port must be between 1 and 65535")
+    if args.image is not None and args.web_preview_port is not None:
+        parser.error("--web-preview-port requires the live camera")
     try:
         if args.image is None:
             require_pymycobot()

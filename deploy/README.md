@@ -32,13 +32,23 @@ python -m deploy.run --checkpoint outputs/arc-mycobot-yolo-hand-policy.pt --imag
 python -m deploy.run --device cuda:0 --max-frames 50
 ```
 
+YOLO 화면을 함께 보려면 별도 GUI 없이 로컬 browser preview를 켠다. 정사각형으로 자른 실제 카메라 영상에 `Human hand` 검출 박스(초록색), 영상 중심(흰색), 실행 모드와 관측 지연을 표시한다. `--max-frames`를 생략하면 `Ctrl+C`까지 계속 보인다.
+
+```bash
+python3 -m deploy.run --device cuda:0 --web-preview-port 8765
+```
+
+Jetson에서 브라우저를 연다면 `http://127.0.0.1:8765`로 접속한다. SSH로 접속 중이라면 **작업 PC의 별도 터미널**에서 `ssh -L 8765:127.0.0.1:8765 er@JETSON_IP`를 실행하고 작업 PC 브라우저에서 같은 주소를 연다. 영상 서버는 Jetson의 loopback 주소에서만 듣는다. 시작 전에는 "Waiting for camera frame"이 보일 수 있다.
+
 첫 출력의 `warmup_s`는 명령 전 모델 준비 시간이다. 각 프레임의 `camera_read_s`, `inference_s`, `observation_age_s`로 지연 구간을 확인한다. `observation_age_s`가 1초를 넘으면 `--execute`는 명령 없이 멈춘다. 특히 매 프레임의 `inference_s`가 1초에 가깝거나 더 길면 관측 유효기간을 늘려 우회하지 말고 read-only preview의 수치를 먼저 확인한다. SSH 환경의 GDK 표시 오류가 남더라도 영상 창은 이 명령에서 사용하지 않는다. 카메라 자체가 열리지 않으면 `/dev/video0`의 존재·권한과 다른 프로세스 점유를 확인한다.
 
 실기 명령을 내릴 때는 팔을 **수동으로** J1–J5 ≈ 0°, J6 ≈ -45°의 충돌 없는 시작 자세에 놓고 실행한다. 코드는 자동으로 홈 자세로 이동하지 않는다. 처음에는 짧게 관찰한다.
 
 ```bash
-python -m deploy.run --device cuda:0 --execute --max-frames 20
+python3 -m deploy.run --device cuda:0 --execute --web-preview-port 8765 --max-frames 50
 ```
+
+이전 `--max-frames 5` preview에서 팔이 움직이지 않는 것은 정상이다. 실행 모드의 terminal JSON에서 `box` 마지막 값이 `1.0`, `sent_target_deg`가 숫자 목록인지 확인한다. `angles_deg`는 실제 관절 피드백이다. `observation_age_s`가 매 프레임 1초 미만이고 로봇 상태가 정상일 때만 `--execute`를 시험한다. 검출된 손이 없으면 명령을 보내지 않고 멈춘다. 실행 모드에서도 `sent_target_deg`와 `angles_deg`가 거의 같으면 눈에 띄는 이동이 없을 수 있다.
 
 카메라 방향이 예상과 다르면 `--rotate 90|180|270`, `--flip-x`, `--flip-y`를 preview에서 확인한다. 카메라 프레임은 중심을 정사각형으로 잘라 학습 때의 정사각형 영상 형식에 맞춘다. 종료는 `Ctrl+C`다.
 
