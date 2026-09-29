@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 import torch
 
+from deploy.arm import ArmConfig, ArmSession, require_pymycobot
 from deploy.controller import Limits, UnsafeTarget, check_start, plan_target
 from deploy.runtime import CHECKPOINT_NAME, HF_REPO, HF_REVISION, HandPolicyRuntime, resolve_checkpoint
 
@@ -63,26 +64,7 @@ def run_offline(args, runtime):
     )
 
 
-def load_arm_types():
-    """Load the separately installed hardware package with an actionable error."""
-    try:
-        from mycobot_control.sdk.session import ArmConfig, ArmSession
-    except ModuleNotFoundError as exc:
-        if exc.name == "mycobot_control" or (exc.name or "").startswith("mycobot_control."):
-            raise RuntimeError(
-                "mycobot-control is missing from this Python environment. "
-                "Clone git@github.com:arclab-kmu/mycobot-control.git next to arc-mycobot, "
-                "then run: python -m pip install -e '../mycobot-control[arm]'"
-            ) from exc
-        raise
-    return ArmConfig, ArmSession
-
-
-def run_camera(args, runtime, arm_config_type=None, arm_session_type=None, camera_factory=None):
-    # Import only on the real-arm path. This package owns the serial lock,
-    # read-only backend, feedback checks, command limits, and stop() behavior.
-    if arm_config_type is None or arm_session_type is None:
-        arm_config_type, arm_session_type = load_arm_types()
+def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSession, camera_factory=None):
     if camera_factory is None:
         camera_factory = cv2.VideoCapture
     camera = camera_factory(args.camera)
@@ -90,13 +72,12 @@ def run_camera(args, runtime, arm_config_type=None, arm_session_type=None, camer
         raise RuntimeError(f"cannot open camera {args.camera}")
     camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     config = arm_config_type(
-        live=True,
         read_only=not args.execute,
-        transport="serial",
         port=args.port,
         baud=args.baud,
         speed=COMMAND_SPEED,
         max_feedback_age_s=MAX_FEEDBACK_LATENCY_S,
+        max_observation_age_s=MAX_OBSERVATION_AGE_S,
         max_command_delta_deg=Limits().max_step_degrees + 0.01,
     )
     last_angles = None
@@ -188,7 +169,8 @@ def cli():
     if args.max_frames is not None and args.max_frames < 1:
         parser.error("--max-frames must be positive")
     try:
-        arm_types = load_arm_types() if args.image is None else None
+        if args.image is None:
+            require_pymycobot()
     except RuntimeError as exc:
         parser.exit(2, f"{exc}\n")
     checkpoint = resolve_checkpoint(args.checkpoint, args.hf_repo, args.hf_revision, args.hf_file)
@@ -196,7 +178,7 @@ def cli():
     if args.image is not None:
         run_offline(args, runtime)
     else:
-        run_camera(args, runtime, *arm_types)
+        run_camera(args, runtime)
 
 
 if __name__ == "__main__":

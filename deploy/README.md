@@ -1,6 +1,6 @@
 # myCobot 280 JN hand-centering deployment
 
-이 폴더는 Isaac Lab 없이 Jetson Nano에서 손목 USB 카메라, 사전 학습 YOLO `Human hand`, PPO 정책, myCobot 280을 연결한다. Python 3.8 문법이다. 기본은 **preview**이며 카메라와 로봇 관절을 읽지만 이동 명령은 보내지 않는다. `--execute`를 넣어야만 `mycobot-control`의 gate를 통해 `send_angles`를 보낸다.
+이 폴더는 Isaac Lab 없이 Jetson Nano에서 손목 USB 카메라, 사전 학습 YOLO `Human hand`, PPO 정책, myCobot 280을 연결한다. Python 3.8 문법이다. 기본은 **preview**이며 카메라와 로봇 관절을 읽지만 이동 명령은 보내지 않는다. `--execute`를 넣어야만 이 폴더의 안전 검사를 거쳐 `pymycobot.send_angles`를 호출한다.
 
 ## Environment
 
@@ -8,19 +8,15 @@
 - **Torch 1.13이 import되는 바로 그 Python 3.8 환경**을 사용한다. 새 `venv`를 만들기만 하면 기존 Torch가 자동으로 들어가지는 않는다. 시스템 site-packages에 Torch가 설치된 경우에는 `python3.8 -m venv --system-site-packages .venv-deploy`를 사용할 수 있다. 다른 venv 안에 Torch가 있다면 그 venv를 그대로 사용한다.
 - 해당 환경에서 `python -c 'import torch, torchvision; print(torch.__version__, torchvision.__version__, torch.cuda.is_available())'`로 JetPack에 맞는 Torch/Torchvision 조합을 먼저 확인한다. Ultralytics는 Python 3.8+와 PyTorch 1.8+를 지원하지만 Jetson의 Torch/Torchvision 빌드는 일반 PyPI wheel과 다를 수 있다. [Ultralytics 설치 안내](https://docs.ultralytics.com/quickstart), [Jetson 안내](https://docs.ultralytics.com/guides/nvidia-jetson).
 
-`mycobot-control`은 별도 저장소다. Jetson에 아직 없다면 `arc-mycobot` 옆에 checkout하고, **배포 실행에 사용할 같은 Python 환경**에 설치한다:
+**배포 실행에 사용할 같은 Python 환경**에서 설치한다. 별도 로봇 제어 저장소는 필요하지 않다:
 
 ```bash
 cd arc-mycobot
-git clone git@github.com:arclab-kmu/mycobot-control.git ../mycobot-control  # 이미 있으면 생략
 python -m pip install -r deploy/requirements.txt
-python -m pip install -e '../mycobot-control[arm]'
-python -c 'import sys, torch, torchvision, cv2, ultralytics, pymycobot, mycobot_control; print(sys.executable, mycobot_control.__file__, torch.cuda.is_available())'
+python -c 'import sys, torch, torchvision, cv2, ultralytics, pymycobot; print(sys.executable, pymycobot.__file__, torch.cuda.is_available())'
 ```
 
-`No module named 'mycobot_control'`가 나오면 위 `pip install -e` 명령을 **`python -m deploy.run`에 쓰는 동일한 `python`**으로 다시 실행한다. SSH 접근이 없으면 이미 받은 `mycobot-control` 저장소를 Jetson의 `../mycobot-control`에 복사한 뒤 설치한다. `--image` 사진 확인에는 이 패키지가 필요하지 않지만, 카메라 preview와 `--execute`에는 필요하다.
-
-`arc-mycobot`의 루트 `uv sync`는 Isaac Sim까지 설치하므로 이 Jetson 배포에는 사용하지 않는다. `mycobot-control`의 UART 잠금과 joint limit·feedback gate를 재사용한다. ROS 노드 등 `/dev/ttyTHS1`을 사용하는 다른 프로세스와 동시에 실행하지 않는다.
+`arc-mycobot`의 루트 `uv sync`는 Isaac Sim까지 설치하므로 이 Jetson 배포에는 사용하지 않는다. `deploy/arm.py`가 UART 잠금과 관절 피드백·명령 제한을 수행한다. ROS 노드 등 `/dev/ttyTHS1`을 사용하는 다른 프로세스와 동시에 실행하지 않는다.
 
 ## Run order
 
@@ -48,5 +44,5 @@ python -m deploy.run --device cuda:0 --execute --max-frames 20
 
 - 관측은 손 box 5개, J1–J6 상대각·속도 각 6개, 이전 action 5개로 22개다. RGB는 YOLO에만 사용된다. 정책 출력은 J1–J5 **절대 관절 목표각**이다. J6 목표는 -45°로 고정하며 그리퍼 명령은 없다.
 - `--execute` 시작 시 J1–J5는 각각 ±10°, J6은 -45° ±3°여야 한다. 정책 목표와 관절 피드백은 J1–J5 ±30° 안에 있어야 하고, 한 번의 명령은 실측 각도에서 관절당 최대 1°만 이동한다. 속도 명령은 SDK 값 10, 목표 갱신 주기는 최대 5 Hz다.
-- 손 검출 실패, 비정상 로봇 상태, 오래된 관측(1초 초과), 관절 읽기 오류나 카메라 오류가 나면 추가 명령을 중단하고 `stop()`을 요청한다. 토크는 끄지 않는다. preview는 항상 read-only backend로 접속한다. 직렬 포트는 `mycobot-control`이 세션 동안 잠근다.
+- 손 검출 실패, 비정상 로봇 상태, 오래된 관측(1초 초과), 관절 읽기 오류나 카메라 오류가 나면 추가 명령을 중단하고 `stop()`을 요청한다. 토크는 끄지 않는다. preview에서는 명령을 보내지 않는다. `deploy/arm.py`가 세션 동안 `/tmp/mycobot_lock`을 잡는다. 실행 모드에서는 `set_fresh_mode(1)`을 확인한 뒤 명령을 보낸다.
 - 이 제한은 소프트웨어 방어선이다. 학습은 한 장의 평면 손 사진과 시뮬레이션에 국한되어 실제 손, 카메라 보정, 지연, 관절 응답, 작업 공간 충돌은 검증하지 않았다. 실기 첫 시험에는 팔의 주변 공간과 정지 수단을 확보한다.

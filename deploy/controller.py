@@ -1,4 +1,4 @@
-"""Pure joint-target checks before handing a command to mycobot-control."""
+"""Pure joint-target checks before handing a command to the serial session."""
 
 import math
 from dataclasses import dataclass
