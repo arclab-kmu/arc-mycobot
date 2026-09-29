@@ -8,14 +8,17 @@
 - **Torch 1.13이 import되는 바로 그 Python 3.8 환경**을 사용한다. 새 `venv`를 만들기만 하면 기존 Torch가 자동으로 들어가지는 않는다. 시스템 site-packages에 Torch가 설치된 경우에는 `python3.8 -m venv --system-site-packages .venv-deploy`를 사용할 수 있다. 다른 venv 안에 Torch가 있다면 그 venv를 그대로 사용한다.
 - 해당 환경에서 `python -c 'import torch, torchvision; print(torch.__version__, torchvision.__version__, torch.cuda.is_available())'`로 JetPack에 맞는 Torch/Torchvision 조합을 먼저 확인한다. Ultralytics는 Python 3.8+와 PyTorch 1.8+를 지원하지만 Jetson의 Torch/Torchvision 빌드는 일반 PyPI wheel과 다를 수 있다. [Ultralytics 설치 안내](https://docs.ultralytics.com/quickstart), [Jetson 안내](https://docs.ultralytics.com/guides/nvidia-jetson).
 
-`arc-mycobot`와 `mycobot-control`을 같은 상위 폴더에 checkout한 뒤, 위 환경에서 실행한다:
+`mycobot-control`은 별도 저장소다. Jetson에 아직 없다면 `arc-mycobot` 옆에 checkout하고, **배포 실행에 사용할 같은 Python 환경**에 설치한다:
 
 ```bash
 cd arc-mycobot
+git clone git@github.com:arclab-kmu/mycobot-control.git ../mycobot-control  # 이미 있으면 생략
 python -m pip install -r deploy/requirements.txt
 python -m pip install -e '../mycobot-control[arm]'
-python -c 'import torch, torchvision, cv2, ultralytics, pymycobot, mycobot_control; print(torch.cuda.is_available())'
+python -c 'import sys, torch, torchvision, cv2, ultralytics, pymycobot, mycobot_control; print(sys.executable, mycobot_control.__file__, torch.cuda.is_available())'
 ```
+
+`No module named 'mycobot_control'`가 나오면 위 `pip install -e` 명령을 **`python -m deploy.run`에 쓰는 동일한 `python`**으로 다시 실행한다. SSH 접근이 없으면 이미 받은 `mycobot-control` 저장소를 Jetson의 `../mycobot-control`에 복사한 뒤 설치한다. `--image` 사진 확인에는 이 패키지가 필요하지 않지만, 카메라 preview와 `--execute`에는 필요하다.
 
 `arc-mycobot`의 루트 `uv sync`는 Isaac Sim까지 설치하므로 이 Jetson 배포에는 사용하지 않는다. `mycobot-control`의 UART 잠금과 joint limit·feedback gate를 재사용한다. ROS 노드 등 `/dev/ttyTHS1`을 사용하는 다른 프로세스와 동시에 실행하지 않는다.
 

@@ -63,13 +63,26 @@ def run_offline(args, runtime):
     )
 
 
+def load_arm_types():
+    """Load the separately installed hardware package with an actionable error."""
+    try:
+        from mycobot_control.sdk.session import ArmConfig, ArmSession
+    except ModuleNotFoundError as exc:
+        if exc.name == "mycobot_control" or (exc.name or "").startswith("mycobot_control."):
+            raise RuntimeError(
+                "mycobot-control is missing from this Python environment. "
+                "Clone git@github.com:arclab-kmu/mycobot-control.git next to arc-mycobot, "
+                "then run: python -m pip install -e '../mycobot-control[arm]'"
+            ) from exc
+        raise
+    return ArmConfig, ArmSession
+
+
 def run_camera(args, runtime, arm_config_type=None, arm_session_type=None, camera_factory=None):
     # Import only on the real-arm path. This package owns the serial lock,
     # read-only backend, feedback checks, command limits, and stop() behavior.
     if arm_config_type is None or arm_session_type is None:
-        from mycobot_control.sdk.session import ArmConfig, ArmSession
-
-        arm_config_type, arm_session_type = ArmConfig, ArmSession
+        arm_config_type, arm_session_type = load_arm_types()
     if camera_factory is None:
         camera_factory = cv2.VideoCapture
     camera = camera_factory(args.camera)
@@ -174,12 +187,16 @@ def cli():
         parser.error("--image and --execute cannot be combined")
     if args.max_frames is not None and args.max_frames < 1:
         parser.error("--max-frames must be positive")
+    try:
+        arm_types = load_arm_types() if args.image is None else None
+    except RuntimeError as exc:
+        parser.exit(2, f"{exc}\n")
     checkpoint = resolve_checkpoint(args.checkpoint, args.hf_repo, args.hf_revision, args.hf_file)
     runtime = HandPolicyRuntime(checkpoint, device=args.device, yolo_weights=args.yolo_weights)
     if args.image is not None:
         run_offline(args, runtime)
     else:
-        run_camera(args, runtime)
+        run_camera(args, runtime, *arm_types)
 
 
 if __name__ == "__main__":

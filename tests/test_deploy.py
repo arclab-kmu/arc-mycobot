@@ -1,6 +1,8 @@
 """Real-arm deployment guards using fake camera and fake gated arm."""
 
 import ast
+import builtins
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,7 +10,7 @@ import numpy as np
 import pytest
 import torch
 from deploy.controller import UnsafeTarget, check_start, plan_target
-from deploy.run import rgb_frame, run_camera
+from deploy.run import cli, load_arm_types, rgb_frame, run_camera
 from deploy.runtime import Prediction, box_from_results, verify_checkpoint
 
 
@@ -140,6 +142,24 @@ def test_bad_start_pose_sends_no_command():
     assert arm is not None
     assert arm.commands == []
     assert arm.halts == ["deployment ended"]
+
+
+def test_missing_hardware_package_has_install_instruction(monkeypatch, capsys):
+    original_import = builtins.__import__
+
+    def missing_hardware_package(name, *args, **kwargs):
+        if name == "mycobot_control.sdk.session":
+            raise ModuleNotFoundError("No module named 'mycobot_control'", name="mycobot_control")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", missing_hardware_package)
+    with pytest.raises(RuntimeError, match="python -m pip install -e"):
+        load_arm_types()
+    monkeypatch.setattr(sys, "argv", ["deploy.run", "--max-frames", "1"])
+    with pytest.raises(SystemExit) as error:
+        cli()
+    assert error.value.code == 2
+    assert "python -m pip install -e" in capsys.readouterr().err
 
 
 def test_checkpoint_hash_rejects_another_file(tmp_path):
