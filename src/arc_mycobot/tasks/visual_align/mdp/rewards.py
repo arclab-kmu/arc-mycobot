@@ -9,8 +9,8 @@ from .observations import detected_box
 
 
 def box_visible(env: ManagerBasedRLEnv, box_func: Callable = detected_box) -> torch.Tensor:
-    """Reward keeping the marked cube in view."""
-    return detected_box(env)[:, 4]
+    """Reward keeping the configured target visible."""
+    return box_func(env)[:, 4]
 
 
 def box_centering(env: ManagerBasedRLEnv, std: float = 0.25, box_func: Callable = detected_box) -> torch.Tensor:

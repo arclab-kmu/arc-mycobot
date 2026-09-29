@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from arc_mycobot.vision.box_randomization import corrupt_box_features
 from arc_mycobot.vision.boxes import box_features, red_cube_box
 from arc_mycobot.vision.yolo_boxes import ultralytics_box_features
 
@@ -36,3 +37,26 @@ def test_yolo_adapter_selects_target_class_and_handles_missing():
     features = ultralytics_box_features(results, class_id=2, width=20, height=16)
     assert features[0].tolist() == pytest.approx([0.0, -0.25, 0.2, 0.25, 1.0])
     assert features[1].tolist() == [0.0] * 5
+
+
+def test_corrupt_boxes_preserves_missing_contract_and_bounds():
+    torch.manual_seed(12)
+    boxes = torch.tensor([[0.95, -0.95, 0.9, 0.9, 1.0], [0.0, 0.0, 0.0, 0.0, 0.0]])
+    one = torch.ones((2, 1))
+    zero = torch.zeros((2, 1))
+    output = corrupt_box_features(boxes, one, one, zero, zero)
+    assert output.shape == (2, 5)
+    assert output[1].tolist() == [0.0] * 5
+    assert bool((output[0, :2].abs() <= 1.0).all())
+    assert bool(((output[0, 2:4] >= 0.0) & (output[0, 2:4] <= 1.0)).all())
+    assert output[0, 4] == 1.0
+
+
+def test_corrupt_boxes_can_drop_and_hallucinate():
+    boxes = torch.tensor([[0.1, 0.2, 0.3, 0.4, 1.0], [0.0, 0.0, 0.0, 0.0, 0.0]])
+    zero = torch.zeros((2, 1))
+    one = torch.ones((2, 1))
+    output = corrupt_box_features(boxes, zero, zero, one, one)
+    assert output[0].tolist() == [0.0] * 5
+    assert output[1, 4] == 1.0
+    assert bool((output[1, 2:4] > 0.0).all())

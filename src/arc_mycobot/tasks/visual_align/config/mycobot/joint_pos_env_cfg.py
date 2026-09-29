@@ -4,8 +4,10 @@ import math
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import RigidObjectCfg
+from isaaclab.managers import EventTermCfg, ObservationTermCfg, SceneEntityCfg
 from isaaclab.sensors import TiledCameraCfg
 from isaaclab.utils import configclass
+from isaaclab.utils.noise import UniformNoiseCfg
 
 import arc_mycobot.tasks.visual_align.mdp as mdp
 from arc_mycobot.assets.robots.mycobot_280 import (
@@ -13,7 +15,7 @@ from arc_mycobot.assets.robots.mycobot_280 import (
     MYCOBOT_ARM_JOINTS,
 )
 from arc_mycobot.assets.targets import HAND_PHOTO_USD
-from arc_mycobot.tasks.visual_align.visual_align_env_cfg import VisualAlignEnvCfg
+from arc_mycobot.tasks.visual_align.visual_align_env_cfg import EventCfg, VisualAlignEnvCfg
 
 
 @configclass
@@ -102,6 +104,76 @@ class MyCobotYoloHandEnvCfg(MyCobotVisualAlignEnvCfg):
 
 @configclass
 class MyCobotYoloHandEnvCfg_PLAY(MyCobotYoloHandEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 8
+
+
+@configclass
+class DomainRandEventsCfg(EventCfg):
+    """Vary uncertain moving mass, servo gains, and scene gravity."""
+
+    moving_mass = EventTermCfg(
+        func=mdp.randomize_rigid_body_mass,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot", body_names=["joint[2-6]", "joint6_flange", "gripper_.*", "camera_flange"]
+            ),
+            "mass_distribution_params": (0.8, 1.2),
+            "operation": "scale",
+            "recompute_inertia": True,
+        },
+    )
+    servo_gains = EventTermCfg(
+        func=mdp.randomize_actuator_gains,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=MYCOBOT_ARM_JOINTS),
+            "stiffness_distribution_params": (0.85, 1.15),
+            "damping_distribution_params": (0.85, 1.15),
+            "operation": "scale",
+        },
+    )
+    gravity = EventTermCfg(
+        func=mdp.randomize_physics_scene_gravity,
+        mode="interval",
+        interval_range_s=(3.0, 5.0),
+        params={
+            "gravity_distribution_params": ([0.0, 0.0, -10.3], [0.0, 0.0, -9.3]),
+            "operation": "abs",
+        },
+    )
+
+
+@configclass
+class MyCobotYoloHandDomainRandEnvCfg(MyCobotYoloHandEnvCfg):
+    """Real-gravity hand alignment with per-episode actuator and detector error."""
+
+    events: DomainRandEventsCfg = DomainRandEventsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 32
+        self.scene.robot.spawn.rigid_props.disable_gravity = False
+        self.events.reset_robot_joints.params["position_range"] = (-0.08, 0.08)
+        self.observations.policy.enable_corruption = True
+        self.observations.policy.box = ObservationTermCfg(
+            func=mdp.RandomizedHandBox,
+            params={
+                "center_std_max": 0.04,
+                "size_std_max": 0.12,
+                "dropout_max": 0.12,
+                "false_positive_max": 0.01,
+            },
+        )
+        self.observations.policy.joint_pos.noise = UniformNoiseCfg(n_min=-0.01, n_max=0.01)
+        self.observations.policy.joint_vel.noise = UniformNoiseCfg(n_min=-0.04, n_max=0.04)
+        # Rewards use the unperturbed detector output cached for this sim step.
+
+
+@configclass
+class MyCobotYoloHandDomainRandEnvCfg_PLAY(MyCobotYoloHandDomainRandEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.scene.num_envs = 8

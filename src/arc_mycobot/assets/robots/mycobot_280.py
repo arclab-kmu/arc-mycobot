@@ -24,7 +24,7 @@ What comes out:
     quotes a payload (250 g), a working radius (280 mm) and a repeatability
     (+-0.5 mm) for this arm, but no torque limit and no servo gains. Every value
     in the two blocks marked ``TODO(unverified)`` is therefore a modelling
-    choice, chosen to be physically sane for a 0.97 kg arm rather than measured.
+    choice, chosen for a nominal 1.20 kg arm, gripper, and camera assembly rather than measured.
     They are good enough for a simulation-only reach task -- the policy learns
     against whatever dynamics it is given -- and they are *not* good enough for
     sim-to-real transfer.
@@ -144,9 +144,9 @@ MYCOBOT_280_JN_CFG = ArticulationCfg(
         collider_type="convex_hull",
         self_collision=False,
         activate_contact_sensors=False,
-        # Arm and gripper links have explicit inertial blocks. Empty camera/TCP
-        # reference frames may need this nonzero fallback when kept separate.
-        link_density=100.0,
+        # Every link has an inertial block. Four reference frames carry only
+        # 0.1 g each; leaving them massless made the importer assign 1 kg each.
+        link_density=0.0,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             # Gravity ON. This is a simulation-only task, the arm is light, and
             # the actuators are sized to hold it, so there is no reason to hide

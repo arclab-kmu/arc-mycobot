@@ -48,7 +48,12 @@ def test_packaged_mass_matches_component_specs(path: Path):
     assert arm == pytest.approx(1.030, abs=1e-6)
     assert gripper == pytest.approx(0.110, abs=1e-6)
     assert masses["camera_flange"] == pytest.approx(0.060, abs=1e-6)
-    assert sum(masses.values()) == pytest.approx(1.200, abs=1e-6)
+    # PhysX requires nonzero inertial frames when fixed joints are retained for
+    # camera attachment. Their total numerical contribution is only 0.4 g.
+    for frame in ("tool_mount", "camera_mount", "camera_link", "tcp"):
+        assert masses[frame] == pytest.approx(0.0001, abs=1e-8)
+    assert len(masses) == len(root.findall("link"))
+    assert sum(masses.values()) == pytest.approx(1.2004, abs=1e-6)
     inertia = root.find("link[@name='camera_flange']/inertial/inertia")
     assert inertia is not None
     assert all(float(inertia.attrib[axis]) > 0 for axis in ("ixx", "iyy", "izz"))

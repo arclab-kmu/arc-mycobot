@@ -37,3 +37,9 @@ class MyCobotVisualAlignPPORunnerCfg(RslRlOnPolicyRunnerCfg):
 @configclass
 class MyCobotYoloHandPPORunnerCfg(MyCobotVisualAlignPPORunnerCfg):
     experiment_name = "visual_align_mycobot_280_jn_yolo_hand"
+
+
+@configclass
+class MyCobotYoloHandDomainRandPPORunnerCfg(MyCobotYoloHandPPORunnerCfg):
+    max_iterations = 600
+    experiment_name = "visual_align_mycobot_280_jn_yolo_hand_dr"

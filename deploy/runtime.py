@@ -14,9 +14,9 @@ import torch.nn.functional as F
 from torch import nn
 
 HF_REPO = "arclab-kmu/arc-mycobot-yolo-hand-policy"
-HF_REVISION = "8d28bc59e05888c0dc06705a7e5ea5b64d2efe75"
+HF_REVISION = "main"
 CHECKPOINT_NAME = "arc-mycobot-yolo-hand-policy.pt"
-CHECKPOINT_SHA256 = "24b92b031a4221d27b0372a84f80337adf23a04c095efc48a856127c88d363e2"
+CHECKPOINT_SHA256 = "b38c11966cba9985add2e46c0d3877479b50206b9593d81f2fdf28adc18a7a56"
 YOLO_NAME = "yolov8n-oiv7.pt"
 HAND_CLASS = 267
 IMAGE_SIZE = 320

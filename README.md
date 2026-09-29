@@ -101,6 +101,11 @@ uv run train --task Isaac-Reach-MyCobot280JN-v0 --headless --num_envs 64 --max_i
 | 질량 | 패키지 URDF 명목 합계 1.200 kg = Jetson Nano 팔 1.030 kg + adaptive gripper 0.110 kg + Camera Flange 2.0 0.060 kg. 카메라 없는 생성 URDF는 1.140 kg. 링크별 분배·관성·실제 USB 카메라 무게는 미측정. |
 | 도달 범위 | flange 기준 수평 302 mm, `z` ∈ [−103, +447] mm |
 
+패키지 URDF는 센서 부착용 가상 프레임 4개에 각각 0.1 g의 수치상 inertial을
+추가했다. 따라서 실제 PhysX 합계는 약 **1.2004 kg**이다. 이전에는 이 프레임이
+질량 없이 import되어 각 1 kg의 기본값을 받았으므로, XML의 1.200 kg이 실제
+시뮬레이션 질량을 나타내지 못했다.
+
 이 질량 변경 이전에 학습한 checkpoint의 동역학은 현재 URDF와 다르다. 시뮬레이션
 평가를 다시 수행한 뒤 재학습 필요성을 판단해야 한다.
 
@@ -396,6 +401,43 @@ uv run --extra yolo visual_align_eval --task Isaac-Visual-Align-YOLO-Hand-MyCobo
 **평면 손 사진** 한 장이다. 손의 3D 형상, 다양한 사람·조명·가림,
 실물 카메라의 검출 지연과 팔 구동은 아직 검증하지 않았다. 따라서
 이 정책의 실물 손 추종 성공을 뜻하지 않는다.
+
+### Gravity-on domain-randomized hand policy
+
+`Isaac-Visual-Align-YOLO-Hand-DR-MyCobot280JN-v0`는 기존 정책과 같은
+22개 관측값·5개 action을 쓰되 중력을 켠다. Isaac Lab에서 읽은 로봇의 기본
+질량은 1.2004 kg이다. 팔의 움직이는 link·그리퍼·카메라 플랜지 질량은
+환경별로 0.8–1.2배, 관절 servo stiffness·damping은 0.85–1.15배로
+시작 시 무작위화한다. 전체 장면의 중력은 3–5초 간격으로
+`-9.3`–`-10.3 m/s²`에서 바뀐다. 관절 관측에는 위치 ±0.01 rad,
+속도 ±0.04 rad/s 오차를 넣는다. YOLO box에는 episode별 최대 중심
+표준편차 0.04, 크기 표준편차 12%, 누락률 12%, 미검출 시 가짜 box 확률
+1%를 넣는다. 보상은 노이즈를 더하기 전의 실제 YOLO box로 계산한다.
+기존 `visible` 보상이 YOLO 대신 빨간 큐브 함수를 읽던 오류도 고쳤다.
+
+```bash
+uv run --extra yolo train --task Isaac-Visual-Align-YOLO-Hand-DR-MyCobot280JN-v0 --num_envs 32 --headless --enable_cameras --max_iterations 600 --seed 20260929
+uv run --extra yolo visual_align_eval --task Isaac-Visual-Align-YOLO-Hand-DR-MyCobot280JN-Play-v0 --checkpoint /path/to/model.pt --num_envs 32 --steps 120 --seed 20260930
+```
+
+이 무작위화는 한 장의 평면 손 사진에서 검출과 제어 오차를 흉내 낸다.
+다양한 실제 손, 조명, 가림 및 Jetson 검출 지연을 검증한 것은 아니다.
+
+600 iteration 실행의 마지막 checkpoint는
+`outputs/arc-mycobot-yolo-hand-policy.pt`에 복사했다. 크기 492,347 bytes,
+SHA-256 `b38c11966cba9985add2e46c0d3877479b50206b9593d81f2fdf28adc18a7a56`다.
+같은 무작위화 평가 환경에서 기존 YOLO 정책과 새 정책을 동일한 seed로
+비교했다(32환경 × 100 step, 마지막 20 step, 중심 오차 `<0.1`).
+
+| 평가 seed | 이전 정책 정렬률 | 새 정책 정렬률 | 이전/새 평균 중심 오차 |
+| --- | ---: | ---: | ---: |
+| 20260930 | 25.2% | 100% | 0.1906 / 0.0220 |
+| 20260931 | 24.7% | 100% | 0.1921 / 0.0216 |
+
+두 정책 모두 같은 시작 분포·표적 궤적과 명목 물성 범위에서 평가했다.
+평가 중 환경별 총 질량 범위는 각각 1.148–1.247 kg, 1.121–1.272 kg이었다.
+연속 frame을 집계한 값이므로 독립 episode의 성공 확률이 아니다.
+카메라와 그리퍼 실물을 계량하거나 실기 성능을 확인한 결과도 아니다.
 
 ### Hand policy preview from a file or Hugging Face
 

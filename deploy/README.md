@@ -20,10 +20,10 @@ python -c 'import sys, torch, torchvision, cv2, ultralytics, pymycobot; print(sy
 
 ## Run order
 
-처음 실행은 사진 한 장으로 Hugging Face 다운로드, 체크섬, YOLO와 정책 로드를 확인한다. 기본 모델은 [`arclab-kmu/arc-mycobot-yolo-hand-policy`](https://huggingface.co/arclab-kmu/arc-mycobot-yolo-hand-policy)의 revision `8d28bc59e05888c0dc06705a7e5ea5b64d2efe75`에 고정한다. 파일 SHA-256은 `24b92b031a4221d27b0372a84f80337adf23a04c095efc48a856127c88d363e2`여야 한다. 첫 실행에는 HF checkpoint와 `yolov8n-oiv7.pt`를 받으므로 인터넷이 필요하다. 다운로드한 checkpoint를 쓸 때는 `--checkpoint /path/to/arc-mycobot-yolo-hand-policy.pt`, YOLO를 별도로 준비했다면 `--yolo-weights /path/to/yolov8n-oiv7.pt`를 준다.
+처음 실행은 사진 한 장으로 YOLO와 정책 로드를 확인한다. 새 gravity-on domain-randomized checkpoint는 `outputs/arc-mycobot-yolo-hand-policy.pt`에 준비했다(492,347 bytes, SHA-256 `b38c11966cba9985add2e46c0d3877479b50206b9593d81f2fdf28adc18a7a56`). 로컬 시험은 `--checkpoint`를 사용한다. Hugging Face의 [`arclab-kmu/arc-mycobot-yolo-hand-policy`](https://huggingface.co/arclab-kmu/arc-mycobot-yolo-hand-policy)에서 같은 파일명으로 **교체 업로드한 뒤**에는 기본 `main` revision이 이 새 SHA-256과 일치해야 실행된다. 업로드 전 원격의 옛 파일은 체크섬 검증에 실패하는 것이 정상이다. YOLO를 별도로 준비했다면 `--yolo-weights /path/to/yolov8n-oiv7.pt`를 준다.
 
 ```bash
-python -m deploy.run --image src/arc_mycobot/assets/targets/hand_palm.jpg --device cuda:0
+python -m deploy.run --checkpoint outputs/arc-mycobot-yolo-hand-policy.pt --image src/arc_mycobot/assets/targets/hand_palm.jpg --device cuda:0
 ```
 
 실제 카메라에서는 먼저 preview만 실행한다. 로봇 연결은 Jetson UART `/dev/ttyTHS1` @ 1 Mbaud, 카메라는 `/dev/video0`이 기본이다. 관절 읽기·손 검출·프레임 방향·`observation_age_s`를 확인한다.

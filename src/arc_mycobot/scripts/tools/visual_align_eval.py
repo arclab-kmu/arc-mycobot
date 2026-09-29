@@ -31,6 +31,7 @@ from isaaclab_tasks.utils.parse_cfg import load_cfg_from_registry
 from rsl_rl.runners import OnPolicyRunner
 
 import arc_mycobot.tasks  # noqa: F401
+from arc_mycobot.tasks.visual_align import mdp
 
 
 def main() -> None:
@@ -54,6 +55,9 @@ def main() -> None:
     torch.manual_seed(args.seed)
     obs, _ = wrapped.reset()
     box_func = env.unwrapped.cfg.observations.policy.box.func
+    if box_func is mdp.RandomizedHandBox or isinstance(box_func, mdp.RandomizedHandBox):
+        # Score the actual YOLO detection, not the box corruption seen by PPO.
+        box_func = mdp.detected_hand_box
     initial = box_func(env.unwrapped).cpu()
     target = env.unwrapped.scene["target"]
     target_yz_history = [target.data.root_pos_w[:, 1:3].clone().cpu()]
@@ -70,6 +74,7 @@ def main() -> None:
     boxes = torch.stack(history)
     target_yz = torch.stack(target_yz_history)
     target_yz_path = torch.linalg.vector_norm(target_yz[1:] - target_yz[:-1], dim=2).sum(dim=0)
+    robot_masses = env.unwrapped.scene["robot"].root_physx_view.get_masses().sum(dim=1)
     visible = boxes[:, :, 4] > 0
     error = torch.linalg.vector_norm(boxes[:, :, :2], dim=2)
     late_visible = visible[-20:]
@@ -87,6 +92,7 @@ def main() -> None:
         "late_mean_error_visible": float((late_error * late_visible).sum() / late_visible.sum().clamp(min=1)),
         "mean_target_yz_path_m": float(target_yz_path.mean()),
         "mean_target_yz_displacement_m": float(torch.linalg.vector_norm(target_yz[-1] - target_yz[0], dim=1).mean()),
+        "robot_mass_range_kg": [float(robot_masses.min()), float(robot_masses.max())],
     }
     print("METRICS " + json.dumps(metrics), flush=True)
 
