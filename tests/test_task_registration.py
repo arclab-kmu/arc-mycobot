@@ -17,7 +17,14 @@ import pytest
 
 import arc_mycobot.tasks  # noqa: F401  (registers the environments)
 
-TASKS = ["Isaac-Reach-MyCobot280JN-v0", "Isaac-Reach-MyCobot280JN-Play-v0"]
+TASKS = [
+    "Isaac-Reach-MyCobot280JN-v0",
+    "Isaac-Reach-MyCobot280JN-Play-v0",
+    "Isaac-Visual-Align-MyCobot280JN-v0",
+    "Isaac-Visual-Align-MyCobot280JN-Play-v0",
+    "Isaac-Visual-Align-YOLO-Hand-MyCobot280JN-v0",
+    "Isaac-Visual-Align-YOLO-Hand-MyCobot280JN-Play-v0",
+]
 
 
 @pytest.mark.parametrize("task", TASKS)

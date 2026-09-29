@@ -1,4 +1,4 @@
-"""Forward kinematics straight off the repaired URDF. NumPy only, no Isaac import.
+"""Forward kinematics straight off the packaged URDF. NumPy only, no Isaac import.
 
 This exists so the reach task's goal box can be *derived* rather than guessed.
 A goal distribution that reaches outside the arm's workspace puts a floor under
@@ -7,7 +7,7 @@ myCobot 280's 280 mm reach leaves very little room to be sloppy about it -- an
 error that would be a rounding detail on a 1.3 m UR10e is a quarter of this
 arm's workspace.
 
-It reads the same file Isaac Lab imports (:func:`~.mycobot_urdf.build_mycobot_urdf`),
+It reads the same file Isaac Lab imports (:data:`~arc_mycobot.assets.robots.camera_gripper_assets.CAMERA_GRIPPER_URDF`),
 so the chain here and the chain in simulation cannot drift apart. Only the
 joint types the myCobot uses are implemented -- ``revolute``, ``prismatic`` and
 ``fixed`` -- and anything else raises rather than being silently treated as
@@ -27,7 +27,7 @@ from pathlib import Path
 
 import numpy as np
 
-from arc_mycobot.assets.robots.mycobot_urdf import build_mycobot_urdf
+from arc_mycobot.assets.robots.camera_gripper_assets import CAMERA_GRIPPER_URDF
 
 __all__ = ["Chain", "Joint", "load_chain", "rpy_to_matrix"]
 
@@ -144,10 +144,15 @@ def _parse_joint(element: ET.Element) -> Joint:
             raise ValueError(f"joint {element.attrib['name']!r} is {joint_type} but declares no <limit>")
         limit = (float(limit_element.attrib["lower"]), float(limit_element.attrib["upper"]))
 
+    parent_element = element.find("parent")
+    child_element = element.find("child")
+    if parent_element is None or child_element is None:
+        raise ValueError(f"joint {element.attrib['name']!r} has no parent or child link")
+
     return Joint(
         name=element.attrib["name"],
-        parent=element.find("parent").attrib["link"],
-        child=element.find("child").attrib["link"],
+        parent=parent_element.attrib["link"],
+        child=child_element.attrib["link"],
         origin_xyz=xyz,
         origin_rot=rpy_to_matrix(*rpy),
         axis=axis,
@@ -161,14 +166,19 @@ def load_chain(tip_link: str, urdf_path: Path | None = None) -> Chain:
 
     Args:
         tip_link: The link whose pose :meth:`Chain.fk` returns.
-        urdf_path: Defaults to the repaired URDF from :mod:`.mycobot_urdf`.
+        urdf_path: Defaults to the packaged camera/gripper URDF.
 
     Raises:
         ValueError: ``tip_link`` is unknown, or the chain to it is not serial.
     """
-    path = urdf_path or build_mycobot_urdf()
+    path = urdf_path or CAMERA_GRIPPER_URDF
     robot = ET.parse(path).getroot()
-    by_child = {joint.find("child").attrib["link"]: joint for joint in robot.findall("joint")}
+    by_child: dict[str, ET.Element] = {}
+    for joint in robot.findall("joint"):
+        child = joint.find("child")
+        if child is None:
+            raise ValueError(f"joint {joint.attrib['name']!r} has no child link")
+        by_child[child.attrib["link"]] = joint
 
     if tip_link not in by_child and robot.find(f"link[@name='{tip_link}']") is None:
         known = sorted(link.attrib["name"] for link in robot.findall("link"))

@@ -28,7 +28,7 @@ rather than assumed:
    ``0.0``, so the import would produce a zero-mass articulation. Handled in two
    places: this module writes explicit ``<inertial>`` blocks (see
    :data:`_LINK_MASSES` for where the numbers come from), and
-   :mod:`.mycobot_280` pairs that with ``collision_from_visuals=True``.
+   the packaged files carry explicit collision meshes for the arm.
 
 4. **The gripper is a five-joint ``<mimic>`` cluster.** ``gripper_controller``
    drives four followers at multiplier +-1.0, and a fifth mimics through another
@@ -42,8 +42,9 @@ It also carries an ``<?xml version="1.1"?>`` declaration and one stray
 ``<xacro:property>`` in a file with a ``.urdf`` extension; both are normalized
 away.
 
-The vendor checkout is **never modified**. The repaired URDF is written to
-``<repo>/generated/`` (git-ignored) and rebuilt whenever the source is newer.
+The vendor checkout is **never modified**. The repaired URDF is written to the
+user's XDG cache directory and rebuilt when the vendor source or this repair
+module changes.
 
 Mesh references
 ---------------
@@ -56,6 +57,7 @@ is checked to exist before the file is written.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import xml.etree.ElementTree as ET
@@ -78,6 +80,7 @@ __all__ = [
     "GRIPPER_CLOSED",
     "GRIPPER_VELOCITY_LIMIT",
     "HOME_POSE",
+    "LIFT_HOME_POSE",
     "MYCOBOT_ROS2_DIR",
     "ROOT_LINK",
     "SOURCE_URDF",
@@ -96,8 +99,8 @@ SOURCE_URDF = (
 )
 """The vendor description: myCobot 280 JetsonNano + adaptive gripper."""
 
-GENERATED_DIR = _REPO_ROOT / "generated"
-"""Where the repaired URDF lands. Git-ignored: it is derived, not authored."""
+GENERATED_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")).expanduser() / "arc-mycobot" / "urdf"
+"""User cache for repaired URDFs. Derived files never need to live in the repository."""
 
 _PACKAGE_PREFIX = "package://mycobot_description/"
 _MESH_ROOT = MYCOBOT_ROS2_DIR / "mycobot_description"
@@ -356,14 +359,10 @@ checkout into permanent disagreement. Links are ``jointN``; joints are
 """
 
 FLANGE_BODY = "joint6_flange"
-"""The body the reach task tracks: the tool flange. Not a tool centre point.
+"""The flange body tracked by reach; the packaged camera/gripper sits beyond it.
 
-The adaptive gripper's links are welded (see :data:`GRIPPER_FIXED_AT`) and
-merged into this body, so the flange carries the gripper's mass but the tracked
-*point* is the flange origin -- about 34 mm behind where the gripper body begins
-and further still from where its fingers close. A TCP would be added as an
-offset here and in the goal box together, since both come from the same forward
-kinematics and must move together.
+The reach configuration preserves fixed links so ``camera_link`` remains an
+attachable sensor frame. Its tracked *point* remains the flange origin, not TCP.
 """
 
 HOME_POSE = {
@@ -390,6 +389,20 @@ because it is a statement about the URDF's joints and a CPU-only test has to be
 able to read it without starting Omniverse.
 """
 
+LIFT_HOME_POSE = {
+    "joint2_to_joint1": 0.7787,
+    "joint3_to_joint2": -0.4468,
+    "joint4_to_joint3": -2.5084,
+    "joint5_to_joint4": -0.1863,
+    "joint6_to_joint5": -2.3629,
+    "joint6output_to_joint6": 2.3146,
+}
+"""Lift reset posture [rad]. J6 compensates the camera mount's +45 degree roll.
+
+The parallel pads face the cube at this pose. The jaw centre is near
+``(0.237, 0.0, 0.089)`` m in the root frame; the lift cube starts below it.
+"""
+
 _GRIPPER_JOINTS = (
     "gripper_controller",
     "gripper_base_to_gripper_left2",
@@ -398,7 +411,7 @@ _GRIPPER_JOINTS = (
     "gripper_base_to_gripper_right2",
     "gripper_right3_to_gripper_right1",
 )
-"""The mimic cluster: one driver plus five followers. All welded."""
+"""The vendor mimic cluster, welded or replaced according to the gripper mode."""
 
 # -- link masses --------------------------------------------------------------
 # The vendor URDF has no <inertial> at all, so these are *authored here*, not
@@ -644,7 +657,7 @@ def build_mycobot_urdf(
             ``"actuated"`` keeps the four joints in
             :data:`ACTUATED_GRIPPER_JOINTS` movable so the jaw can close, for
             the lift task. Each mode writes its own file.
-        force: Rebuild even when the cached output is newer than the source.
+        force: Rebuild even when the cached source and repair signature matches.
 
     Returns:
         Path to a plain, well-formed URDF with absolute mesh paths, real
@@ -666,7 +679,10 @@ def build_mycobot_urdf(
         raise ValueError(f"gripper must be 'welded', 'actuated', 'mimic' or 'parallel', got {gripper!r}")
     suffix = {"welded": "", "actuated": "_actuated", "mimic": "_mimic", "parallel": "_parallel"}[gripper]
     out_path = GENERATED_DIR / f"mycobot_280_jn_adaptive_gripper{suffix}.urdf"
-    if not force and out_path.is_file() and out_path.stat().st_mtime >= SOURCE_URDF.stat().st_mtime:
+    cache_key = hashlib.sha256(
+        b"\0".join((SOURCE_URDF.read_bytes(), Path(__file__).read_bytes(), str(_MESH_ROOT).encode(), gripper.encode()))
+    ).hexdigest()
+    if not force and out_path.is_file() and f"cache-key={cache_key}" in out_path.read_text(encoding="utf-8")[:350]:
         return out_path
 
     robot = ET.fromstring(_repair_text(SOURCE_URDF.read_text(encoding="utf-8")))
@@ -787,6 +803,7 @@ def build_mycobot_urdf(
     xml_text = (
         "<?xml version='1.0' encoding='utf-8'?>\n"
         "<!-- GENERATED by arc_mycobot.assets.robots.mycobot_urdf - do not edit, do not commit.\n"
+        f"     cache-key={cache_key}\n"
         f"     Source: {SOURCE_URDF}\n"
         "     Repairs: malformed <limit> quote; XML 1.1 declaration; stray <xacro:property>;\n"
         f"     velocity=0 -> {ARM_VELOCITY_LIMIT} rad/s; <inertial> added to every link;\n"

@@ -1,0 +1,75 @@
+#usda 1.0
+(
+    defaultPrim = "HandTarget"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "HandTarget" (
+    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+)
+{
+    bool physics:kinematicEnabled = 1
+    float physics:mass = 0.02
+    bool physics:rigidBodyEnabled = 1
+
+    def Cube "Board" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        bool physics:collisionEnabled = 0
+        color3f[] primvars:displayColor = [(0.42, 0.42, 0.42)]
+        double size = 0.22
+        float3 xformOp:scale = (0.018, 1, 1)
+        uniform token[] xformOpOrder = ["xformOp:scale"]
+    }
+
+    def Mesh "Photo" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        uniform bool doubleSided = 1
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        rel material:binding = </HandTarget/Looks/PhotoMaterial>
+        point3f[] points = [(-0.0022, -0.11, -0.11), (-0.0022, -0.11, 0.11), (-0.0022, 0.11, 0.11), (-0.0022, 0.11, -0.11)]
+        texCoord2f[] primvars:st = [(0, 0), (0, 1), (1, 1), (1, 0)] (
+            interpolation = "faceVarying"
+        )
+        uniform token subdivisionScheme = "none"
+    }
+
+    def "Looks"
+    {
+        def Material "PhotoMaterial"
+        {
+            token outputs:surface.connect = </HandTarget/Looks/PhotoMaterial/Surface.outputs:surface>
+
+            def Shader "Surface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor.connect = </HandTarget/Looks/PhotoMaterial/Texture.outputs:rgb>
+                float inputs:metallic = 0
+                float inputs:roughness = 1
+                token outputs:surface
+            }
+
+            def Shader "Texture"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @./hand_palm.jpg@
+                float2 inputs:st.connect = </HandTarget/Looks/PhotoMaterial/TexCoords.outputs:result>
+                token inputs:wrapS = "clamp"
+                token inputs:wrapT = "clamp"
+                float3 outputs:rgb
+            }
+
+            def Shader "TexCoords"
+            {
+                uniform token info:id = "UsdPrimvarReader_float2"
+                token inputs:varname = "st"
+                float2 outputs:result
+            }
+        }
+    }
+}

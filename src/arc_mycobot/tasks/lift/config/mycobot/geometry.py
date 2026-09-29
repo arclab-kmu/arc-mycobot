@@ -37,27 +37,20 @@ is bounded only by the 19.4-45.6 mm opening.
 CUBE_MASS = 0.02
 """Cube mass [kg]. 20 g, well inside the myCobot 280's 250 g rated payload."""
 
-SPAWN_POS_CENTRE = (0.22, 0.0, CUBE_SIZE / 2 + 0.001)
+SPAWN_POS_CENTRE = (0.237, 0.0, CUBE_SIZE / 2 + 0.001)
 """Where the cube starts, in the robot's root frame [m]. Resting on the ground.
 
-220 mm, not the 170 mm this started at. The grasp point sits 48.4 mm out from
-``gripper_base`` (see :data:`JAW_OFFSET_IN_GRIPPER_BASE`), which makes the
-gripper effectively that much longer, and the arm cannot fold tightly enough to
-put the jaw closer than about 200 mm with a horizontal approach -- swept, the
-residual falls linearly with x and hits zero at 200 mm. Everything from 200 mm
-out is reachable across the full +-40 mm of y.
+The camera flange adds 17 mm along the gripper approach to the former 220 mm
+spawn centre. At the adjusted lift home pose the packaged model's jaw centre is
+at (237, 0, 89) mm; the cube starts directly below it.
 """
 
 SPAWN_POS_RANGE = (0.015, 0.025, 0.0)
 """Half-extent of the spawn randomization [m]: +-15 mm in x, +-25 mm in y.
 
-Every point solves exactly for a horizontal side grasp (swept on a grid out to
-+-20/40 mm, all reachable), so this is not a reachability limit -- it is a
-*discovery* limit. With the corrected jaw the grasp pocket is narrow and the pads
-sweep 15 mm forward as they close, so the pose that works is specific; widening
-the spawn multiplies the variety a policy has to find it in before the action
-penalties arrive. Measured at +-20/40 mm, the policy was still at 9% lifted by
-iteration 400, against 38-51% for the earlier, more forgiving gripper.
+This range belonged to the earlier no-camera model. The new jaw centre is
+aligned with the shifted spawn centre at home, but grasp performance over the
+full range has not yet been re-measured.
 
 Widen it again once the task trains reliably.
 """
@@ -65,13 +58,13 @@ Widen it again once the task trains reliably.
 LIFT_HEIGHT = 0.06
 """Cube height counted as "lifted" [m].
 
-The cube's centre rests at 17 mm, so this is about 43 mm of clear daylight --
+The cube's centre rests at 13.5 mm, so this is about 46.5 mm of clear daylight --
 comfortably more than the settling jitter of a cube being squeezed, and low
 enough to be reachable early in training when the reward still has to bootstrap.
 """
 
-GOAL_POS_CENTRE = (0.21, 0.0, 0.12)
-"""Centre of the goal region for the lifted cube, in the root frame [m]."""
+GOAL_POS_CENTRE = (0.227, 0.0, 0.12)
+"""Goal centre shifted 17 mm with the camera flange to retain the earlier carry displacement [m]."""
 
 GOAL_POS_RANGE = (0.03, 0.05, 0.04)
 """Half-extent of the goal region [m]: the cube must be carried, not just raised."""
@@ -79,19 +72,10 @@ GOAL_POS_RANGE = (0.03, 0.05, 0.04)
 JAW_OFFSET_IN_GRIPPER_BASE = (0.0, 0.0484, 0.0)
 """Grasp point expressed in the ``gripper_base`` link frame [m].
 
-**Not** the midpoint of the two fingertip link origins. That was the first
-version and it was wrong by 32 mm: the origin midpoint sits only 16.8 mm beyond
-the gripper body, so a 32 mm object centred there overlaps ``gripper_base``
-(which reaches y = 13.9 mm) by about 13 mm. An object "grasped" there was being
-wedged into the gripper's body, not pinched by its pads -- visible in a close-up
-render as the cube sunk into the white housing.
-
-This is instead the middle of the volume the pads sweep. The pads run
-y in [27.8, 53.8] mm when open and [43.0, 69.0] mm when closed -- they translate
-15 mm forward as the knuckles rotate -- so the band they cover for the *whole*
-closing motion is [43.0, 53.8] and its centre is 48.4 mm. An object there stays
-between the pads from first contact to full grip, and clears the gripper body by
-18.5 mm.
+The parallel pads have centre y = 43.4 mm and extend 13 mm in each direction,
+so 48.4 mm lies inside their contact length. Their y position stays constant
+while the fingers slide across the jaw. The offset remains tied to the
+``gripper_base`` frame even when the camera flange moves that frame outward.
 
 Constant across arm poses, like the old value: it is a fixed offset in a link
 frame. ``tests/test_gripper.py`` checks that.

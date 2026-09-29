@@ -1,16 +1,15 @@
-"""Articulation configuration for the myCobot 280 JetsonNano with adaptive gripper.
+"""Articulation configurations for the packaged myCobot 280 camera/gripper URDFs.
 
-The articulation is built by converting the *repaired* vendor URDF on the fly --
-see :mod:`.mycobot_urdf` for the four defects that repair fixes and why the
-vendor file cannot be imported as it stands. What comes out:
+The reach and lift tasks load versioned files under ``assets/robots/urdf``.
+See :mod:`.mycobot_urdf` for the vendor repairs from which these assets derive.
+What comes out:
 
 * root link ``joint1``, fixed to the world (this is a desktop arm bolted down);
 * six actuated revolute joints, :data:`MYCOBOT_ARM_JOINTS`, in base-to-flange
   order -- which is also the order the Elephant Robotics ``pymycobot`` API's
   ``get_angles()`` returns;
 * ``joint6_flange`` -- the tool flange, and the body the reach task tracks;
-* the gripper, welded and merged into the flange. It contributes its mass and
-  its geometry and nothing else.
+* the camera flange and fixed gripper, with ``camera_link`` retained for sensors.
 
 .. note::
     The vendor names its *links* ``joint1`` .. ``joint6``. That is confusing and
@@ -37,15 +36,16 @@ import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg
 
+from .camera_gripper_assets import CAMERA_GRIPPER_PARALLEL_URDF, CAMERA_GRIPPER_URDF
 from .mycobot_urdf import (
     ARM_JOINTS,
     ARM_VELOCITY_LIMIT,
     FLANGE_BODY,
     HOME_POSE,
+    LIFT_HOME_POSE,
     PARALLEL_FINGER_JOINTS,
     PARALLEL_OPEN,
     ROOT_LINK,
-    build_mycobot_urdf,
 )
 
 __all__ = [
@@ -60,10 +60,12 @@ __all__ = [
     "MYCOBOT_LIFT_HOME_POSE",
     "MYCOBOT_ROOT_LINK",
     "MYCOBOT_URDF_PATH",
+    "MYCOBOT_LIFT_URDF_PATH",
 ]
 
-MYCOBOT_URDF_PATH = str(build_mycobot_urdf())
-"""Absolute path to the repaired URDF. Generated on import; see :mod:`.mycobot_urdf`."""
+MYCOBOT_URDF_PATH = str(CAMERA_GRIPPER_URDF)
+MYCOBOT_LIFT_URDF_PATH = str(CAMERA_GRIPPER_PARALLEL_URDF)
+"""Packaged camera/gripper URDF paths, with fixed and parallel jaws respectively."""
 
 # The structural constants -- joint names, root link, flange, home posture --
 # live in mycobot_urdf.py, not here. They are statements about the URDF's
@@ -85,7 +87,7 @@ Same list as :data:`MYCOBOT_GRIPPER_JOINTS` now -- with a parallel jaw there are
 no followers to couple, which is precisely what makes it robust. The rotating
 linkage needed a mimic constraint per side and still swept its pads 15 mm
 forward; see ``PARALLEL_FINGER_JOINTS`` in :mod:`.mycobot_urdf`."""
-MYCOBOT_FINGER_BODIES = ["gripper_left1", "gripper_right1"]
+MYCOBOT_FINGER_BODIES = ["gripper_left3", "gripper_right3"]
 """The two fingertip pads -- the bodies that actually touch a grasped object."""
 
 
@@ -134,42 +136,16 @@ MYCOBOT_280_JN_CFG = ArticulationCfg(
         asset_path=MYCOBOT_URDF_PATH,
         fix_base=True,
         root_link_name=MYCOBOT_ROOT_LINK,
-        # True, unlike the NERO config in the sibling repository, and for a
-        # reason specific to this robot: the gripper is welded (see
-        # mycobot_urdf.GRIPPER_FIXED_AT), so merging folds its seven links into
-        # `joint6_flange` and the articulation drops from 14 rigid bodies to 7.
-        # At 4096 environments that halves the body count for geometry that
-        # cannot move relative to the flange anyway. The two names this
-        # repository depends on -- `joint1` and `joint6_flange` -- are both on
-        # the parent side of every merge, so both survive.
-        merge_fixed_joints=True,
-        # The vendor gives the six arm links no <collision> at all -- only the
-        # seven gripper links have any -- so the arm's collision geometry can
-        # only come from its visual meshes, which are heavy: 140k faces across
-        # the six links, 77k of them in `joint1_jet.dae` alone.
-        #
-        # Measured rather than assumed, because the size of those meshes makes
-        # it look expensive: converting with this flag on takes 1.6 s, and with
-        # it off, also 1.6 s. It is not a cost worth trading anything for.
-        #
-        # (If a run appears to hang during setup, this is not the cause. The
-        # renderer is: `SimulationContext.step()` renders by default, and the
-        # first RTX pipeline compile ran past 16 minutes on this machine. Pass
-        # `render=False` when stepping a physics-only check.)
-        #
-        # Convex hulls rather than decomposition: this task has nothing to
-        # collide with -- no object, no obstacle, self-collision off, and the
-        # ground plane 1.05 m below the mounting plane -- so the geometry is
-        # inert here and a closer fit would buy nothing. It is generated anyway
-        # so that the arm is a physical object the day the scene gains one.
-        collision_from_visuals=True,
+        # Keep camera_link as an attachable frame for a future TiledCamera.
+        merge_fixed_joints=False,
+        # The packaged URDF carries convex-hull collision STL files. Use those
+        # directly rather than rebuilding collision from decorative visuals.
+        collision_from_visuals=False,
         collider_type="convex_hull",
         self_collision=False,
         activate_contact_sensors=False,
-        # <inertial> is written for every link by the URDF repair, so this is a
-        # fallback that should never fire. Left non-zero deliberately: if a
-        # future vendor link slips through without one, a light body is far
-        # easier to debug than a zero-mass PhysX assertion.
+        # Arm and gripper links have explicit inertial blocks. Empty camera/TCP
+        # reference frames may need this nonzero fallback when kept separate.
         link_density=100.0,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             # Gravity ON. This is a simulation-only task, the arm is light, and
@@ -220,43 +196,15 @@ MYCOBOT_280_JN_CFG = ArticulationCfg(
         ),
     },
 )
-"""myCobot 280 JetsonNano with adaptive gripper, converted from the repaired URDF."""
+"""myCobot 280 JN with camera and fixed gripper from a packaged URDF."""
 
 
 # -----------------------------------------------------------------------------
 # Lift variant: the same arm with a gripper that can close.
 # -----------------------------------------------------------------------------
 
-MYCOBOT_LIFT_HOME_POSE = {
-    "joint2_to_joint1": 0.7787,
-    "joint3_to_joint2": -0.4468,
-    "joint4_to_joint3": -2.5084,
-    "joint5_to_joint4": -0.1863,
-    "joint6_to_joint5": -2.3629,
-    "joint6output_to_joint6": 3.1000,
-}
-"""Reset posture for the lift task [rad]. **Not** the reach task's home.
-
-The reach home is elbow-bent with the wrist at zero. Reaching a side grasp from
-there needs the wrist to travel -2.36 and +3.14 rad, and with
-``JointPositionAction(scale=0.5, use_default_offset=True)`` the policy would have
-to output **6.3 sigma** on a unit-Gaussian action to get there. It never did:
-trained from the reach home, the jaw plateaued about 45 mm short of the cube for
-1500 iterations and the lift rate stuck near 10%.
-
-This pose is the *same IK branch* as the grasp, lifted 70 mm: solved at the
-grasp and then stepped up in 10 mm increments so the solution never jumps
-branches. From here the excursion to the grasp is 0.93 rad -- **1.86 sigma** --
-and to the middle of the goal region 0.55 rad, 1.10 sigma.
-
-Starting the arm near its work is standard (Isaac Lab's Franka lift does the
-same) and it is not what makes the task easy: the cube spawn, the goal and the
-grasp itself are all still randomized.
-
-The wrist roll is 3.10 rather than the IK's 3.1416, which is exactly the joint's
-limit -- sitting on a limit would clip half the action range on that joint. The
-2.4 deg of roll it gives up is immaterial to a symmetric jaw.
-"""
+MYCOBOT_LIFT_HOME_POSE = LIFT_HOME_POSE
+"""Reset posture for the lift task [rad], defined with the URDF constants."""
 
 # The lift task drives the arm to poses the reach task never visits: jaw at the
 # ground plane, arm near full extension, holding against contact. Measured there,
@@ -298,7 +246,7 @@ have to press with 0.13 N, so even the published figure has a 10x margin.
 
 MYCOBOT_280_JN_LIFT_CFG = ArticulationCfg(
     spawn=sim_utils.UrdfFileCfg(
-        asset_path=str(build_mycobot_urdf("parallel")),
+        asset_path=MYCOBOT_LIFT_URDF_PATH,
         # Inert on this asset: the parallel build carries no <mimic> at all, so
         # there is nothing for the importer to convert (pinned by
         # test_parallel_build_carries_no_mimic). Kept because the flag's name is
@@ -309,25 +257,13 @@ MYCOBOT_280_JN_LIFT_CFG = ArticulationCfg(
         convert_mimic_joints_to_normal_joints=True,
         fix_base=True,
         root_link_name=MYCOBOT_ROOT_LINK,
-        # False, unlike the reach config. Merging would fold the fingertip links
-        # into their knuckles, and the fingertips are exactly the bodies that
-        # have to exist as separate colliders for a grasp to happen at all.
+        # Keep the two sliding finger bodies and the camera_link frame.
         merge_fixed_joints=False,
         # False, unlike the reach config, and this is the single most important
         # line in this file for whether a grasp works.
         #
-        # With it True the arm's collision geometry is convex hulls taken from
-        # decorative visual meshes. Two things went wrong, both measured: the
-        # hulls of the forearm and gripper body fight the ground plane at the
-        # low poses a grasp needs, leaving ~0.19 rad of joint error with the arm
-        # merely holding still; and the fingertip hulls are so asymmetric that
-        # the jaw closes past a centred cube on one side and short of it on the
-        # other (see _PAD_INSET in mycobot_urdf.py).
-        #
-        # Off, the only colliders on the robot are the two box grip pads the
-        # URDF repair writes onto the fingertips. That is the whole contact
-        # model, and it is the right one for this task: a pick-and-lift needs
-        # accurate pads and nothing else.
+        # The packaged parallel URDF has only two box-pad colliders. Enabling
+        # collision_from_visuals would add unwanted arm and gripper hulls.
         #
         # The cost is real and worth stating: the arm's links can pass through
         # the ground plane and through each other. Nothing in this task rewards
@@ -385,10 +321,10 @@ MYCOBOT_280_JN_LIFT_CFG = ArticulationCfg(
         ),
     },
 )
-"""myCobot 280 JN with a gripper that can close, for the lift task.
+"""myCobot 280 JN with camera and sliding gripper, for the lift task.
 
 Differs from :data:`MYCOBOT_280_JN_CFG` in five places, all of them consequences
-of the task now involving contact: the actuated URDF, fixed joints kept
-unmerged so the fingertips stay separate colliders, self-collision on, more
-solver position iterations, and a gripper actuator.
+of the task now involving contact: the parallel-jaw URDF, fixed joints kept
+unmerged so finger colliders stay separate, more solver position iterations,
+and a gripper actuator.
 """

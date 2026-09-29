@@ -6,7 +6,7 @@
 to stay inside the goal box.
 
 Both are properties of numbers in two different files -- the joint limits in the
-repaired URDF and the constants in ``config/mycobot/geometry.py`` -- and neither
+packaged URDF and the constants in ``config/mycobot/geometry.py`` -- and neither
 file knows about the other. A change to either can break the pair without
 breaking anything that raises, and the symptom would be a training run that
 plateaus at a tracking error nobody can explain.
@@ -21,7 +21,7 @@ import numpy as np
 import pytest
 from scipy.optimize import least_squares
 
-from arc_mycobot.assets.robots.mycobot_urdf import ARM_JOINTS, FLANGE_BODY, HOME_POSE, SOURCE_URDF
+from arc_mycobot.assets.robots.mycobot_urdf import ARM_JOINTS, FLANGE_BODY, HOME_POSE
 from arc_mycobot.kinematics.urdf_fk import load_chain
 from arc_mycobot.tasks.reach.config.mycobot.geometry import (
     SUCCESS_THRESHOLD,
@@ -29,8 +29,6 @@ from arc_mycobot.tasks.reach.config.mycobot.geometry import (
     TARGET_POS_CENTRE,
     TARGET_POS_RANGE,
 )
-
-pytestmark = pytest.mark.skipif(not SOURCE_URDF.is_file(), reason=f"mycobot_ros2 checkout not found at {SOURCE_URDF}")
 
 # Both come from mycobot_urdf, which imports no isaaclab -- that is why this
 # whole file runs on CPU in under a second. The robot config re-exports them

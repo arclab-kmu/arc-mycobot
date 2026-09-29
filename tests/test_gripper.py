@@ -145,8 +145,12 @@ def _pad_corners(urdf, targets, pad):
         return np.array([home[n] if n in ARM_JOINTS else targets[n] for n in chain.joint_names])
 
     collision = root.find(f"link[@name='{pad}']/collision")
-    origin = np.fromstring(collision.find("origin").attrib["xyz"], sep=" ")
-    half = np.fromstring(collision.find("geometry/box").attrib["size"], sep=" ") / 2
+    assert collision is not None
+    origin_element = collision.find("origin")
+    box_element = collision.find("geometry/box")
+    assert origin_element is not None and box_element is not None
+    origin = np.fromstring(origin_element.attrib["xyz"], sep=" ")
+    half = np.fromstring(box_element.attrib["size"], sep=" ") / 2
     local = np.array([origin + half * (np.array(s) * 2 - 1) for s in np.ndindex(2, 2, 2)])
     chain = load_chain(pad, urdf)
     pos, rot = chain.fk(q(chain))

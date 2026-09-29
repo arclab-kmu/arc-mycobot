@@ -9,4 +9,5 @@ imported until an environment is actually constructed.
 from . import (
     lift,  # noqa: F401
     reach,  # noqa: F401
+    visual_align,  # noqa: F401
 )

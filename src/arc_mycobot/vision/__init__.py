@@ -1,0 +1,1 @@
+"""Camera observation helpers."""

@@ -7,10 +7,10 @@
 This is the check that produced ``TARGET_POS_CENTRE`` and ``TARGET_POS_RANGE``
 in the task config, and it exists so those numbers can be *re-derived* rather
 than trusted. Run it after changing the goal box, the tracked body, the joint
-limits or the URDF repair.
+limits or the packaged URDF.
 
 It launches no simulator and imports nothing from Isaac Lab: forward kinematics
-comes from :mod:`arc_mycobot.kinematics.urdf_fk`, reading the same repaired URDF
+comes from :mod:`arc_mycobot.kinematics.urdf_fk`, reading the same packaged URDF
 that Isaac Lab converts, and the inverse problem is a bounded least-squares
 solve over the declared joint limits. So it runs on CPU in a few seconds and can
 gate a change before an eight-hour training run discovers the same thing slowly.

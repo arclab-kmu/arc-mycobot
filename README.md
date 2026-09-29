@@ -8,68 +8,61 @@
 </p>
 
 Elephant Robotics **myCobot 280 JetsonNano**와 adaptive gripper를 Isaac Lab에서
-PPO로 학습시킨다. 엔드이펙터 **위치 추종**(reach)과 **큐브 집어 옮기기**(lift)
-두 task가 들어 있다.
+PPO로 학습시킨다. 엔드이펙터 **위치 추종**(reach), **큐브 집어 옮기기**(lift),
+손목 카메라의 **표식 화면 중앙 정렬**(visual align) task가 들어 있다.
 
-로봇은 벤더가 배포하는 `mycobot_ros2` description에서 가져온다. 그 파일은 있는
-그대로는 import되지 않는다 — XML이 well-formed가 아니고, 모든 joint가 velocity
-limit을 0으로 선언하며, inertia를 가진 link가 하나도 없고, gripper는 `<mimic>`
-다섯 개로 엮인 클러스터다. 이 복구는 저장소의 실질적인 일부이고, 문서화된 한
-곳에서만 일어난다 — **`assets/robots/mycobot_urdf.py`**. 벤더 checkout은 절대
-수정하지 않는다.
+두 작업은 저장소에 포함한 팔·카메라·그리퍼 URDF를 읽는다. Reach에는 고정된
+그리퍼, lift에는 두 손가락이 미끄러지는 평행 조 변형을 사용한다. 두 파일 모두
+상대경로 mesh와 공통 +45° `tool_mount`를 포함하므로 실행에 벤더 checkout이나
+`generated/`가 필요 없다. 벤더 URDF의 결함과 복구 방법은
+`assets/robots/mycobot_urdf.py`에 남겨 두었다.
 
-## 두 개의 task
+## 세 개의 task
 
 | task id | 하는 일 | gripper |
 | --- | --- | --- |
 | `Isaac-Reach-MyCobot280JN-v0` | 엔드이펙터 **위치 추종** | 열린 상태로 용접 |
 | `Isaac-Lift-Cube-MyCobot280JN-v0` | **25 mm 큐브**를 집어 목표 지점으로 운반 | sliding 평행 조 |
+| `Isaac-Visual-Align-MyCobot280JN-v0` | RGB에서 검출한 빨간 표식 box를 화면 중앙에 정렬 | sliding 평행 조 |
 
-팔과 URDF 복구, 기구학은 둘이 공유한다. 다른 것은 gripper에 무엇을 허용하느냐
-하나뿐인데, 그 하나가 물리 설정의 거의 전부를 바꾼다. → [lift task](#lift-task)
+팔과 카메라 장착 구조는 공유하고, lift의 그리퍼만 평행 조로 바꾼다.
+→ [lift task](#lift-task)
 
 ## 범위 — reach
 
 시뮬레이션 안에서의 위치 추종. 정책은 자기 joint 상태와 목표 **위치**를 보고
 joint 위치 오프셋을 낸다. 파지도, 접촉도, 자세(orientation) 추종도, 실기도 없다.
 
-gripper는 **열린 상태로 용접**되어 flange에 병합된다. 질량과 형상만 기여하고 그
-외에는 아무것도 하지 않는다. 한 번도 닫지 않는 task에서 mimic joint 다섯 개를
-살려 두는 것보다 이쪽이 나은 이유는 `GRIPPER_FIXED_AT`에 적혀 있다.
+gripper는 **열린 상태로 고정**된다. `camera_link`를 센서 장착 프레임으로 남기기
+위해 fixed link를 병합하지 않는다.
 
 ## 빠른 시작
 
 ```bash
-# 1. 벤더 로봇 description을 sibling checkout으로
-git clone --depth 1 https://github.com/elephantrobotics/mycobot_ros2.git ../mycobot_ros2
-#    (이미 있다면 $MYCOBOT_ROS2_DIR 로 가리켜도 된다)
-
-# 2. 환경 구성 — Isaac Sim 5.1과 Isaac Lab 2.3.2가 pip 의존성으로 들어온다
+# 1. 환경 구성 — Isaac Sim 5.1과 Isaac Lab 2.3.2가 pip 의존성으로 들어온다
 uv sync
 
-# 3. Isaac Sim은 첫 실행에서 NVIDIA Omniverse 라이선스 동의를 묻는데, uv 아래에서는
+# 2. Isaac Sim은 첫 실행에서 NVIDIA Omniverse 라이선스 동의를 묻는데, uv 아래에서는
 #    그 프롬프트에 stdin이 없다. 한 번, 의도를 갖고 수락한다:
 export OMNI_KIT_ACCEPT_EULA=YES
 
-# 4. GPU 시간을 쓰기 전에 로봇과 task를 먼저 검사한다
-uv run pytest                   # ~0.3 s, GPU 불필요: URDF 복구 + task 기하
+# 3. GPU 시간을 쓰기 전에 로봇과 task를 먼저 검사한다
+uv run pytest                   # GPU 불필요: 패키지 자산 + task 기하
 uv run workspace_sweep          # ~10 s, GPU 불필요: 모든 목표가 실제로 도달 가능한가
 uv run list_envs                # 등록된 task id 목록
 
-#    pytest가 "43 passed"가 아니라 "5 passed, 38 skipped"로 끝나면 1단계가 안 된
-#    것이다. 로봇을 건드리는 테스트는 벤더 checkout이 없으면 실패가 아니라
-#    skip되므로, 초록색으로 보여도 통과가 아니다. workspace_sweep이 정확한
-#    경로와 clone 명령을 알려 준다.
+#    벤더 원본 복구 테스트만 벤더 checkout이 없으면 skip된다. 실행 경로는
+#    저장소에 포함된 URDF를 검사하므로 checkout 없이도 검증된다.
 
-# 5. 학습 전에 환경이 도는 것을 눈으로 본다. --max_steps 를 주지 않으면
+# 4. 학습 전에 환경이 도는 것을 눈으로 본다. --max_steps 를 주지 않으면
 #    중단할 때까지 계속 돈다.
 uv run zero_agent   --task Isaac-Reach-MyCobot280JN-v0 --num_envs 16 --headless --max_steps 200
 uv run random_agent --task Isaac-Reach-MyCobot280JN-v0 --num_envs 16 --headless --max_steps 200
 
-# 6. 학습
+# 5. 학습
 uv run train --task Isaac-Reach-MyCobot280JN-v0 --headless
 
-# 7. checkpoint 재생
+# 6. checkpoint 재생
 uv run play --task Isaac-Reach-MyCobot280JN-Play-v0 --num_envs 16
 ```
 
@@ -101,10 +94,11 @@ uv run train --task Isaac-Reach-MyCobot280JN-v0 --headless --num_envs 64 --max_i
 | | |
 | --- | --- |
 | 출처 | `mycobot_ros2/mycobot_description/urdf/mycobot_280_jn/mycobot_280_jn_adaptive_gripper.urdf` |
+| 실행 자산 | `src/arc_mycobot/assets/robots/urdf/`의 고정 그리퍼 / 평행 조 파일 |
 | DOF | revolute 6개, `joint2_to_joint1` … `joint6output_to_joint6` |
 | root link | `joint1` — 고정 베이스이자 목표가 표현되는 프레임 |
 | 추종 body | `joint6_flange` — TCP가 아니라 공구 flange |
-| 질량 | 0.968 kg = 팔 0.85 kg + gripper 0.118 kg. PhysX는 `joint6_flange`를 **0.138 kg**로 보고하는데, 용접된 gripper가 여기에 병합되기 때문이다(0.020 + 0.118). |
+| 질량 | 기존 카메라 없는 모델의 측정값은 0.968 kg. 새 카메라 결합 모델의 PhysX 질량은 다시 측정해야 한다. |
 | 도달 범위 | flange 기준 수평 302 mm, `z` ∈ [−103, +447] mm |
 
 벤더는 자기 **link**들을 `joint1` … `joint6`이라고 부른다. 헷갈리지만 그쪽 것이다.
@@ -125,12 +119,35 @@ joint는 `jointN_to_jointM`이다.
 여기에 `<?xml version="1.1"?>` 선언, 남아 있는 `<xacro:property>`, 그리고 urdfdom이
 ROS 아래에서만 해석하는 `package://` mesh URI도 함께 처리한다.
 
-복구된 파일은 `generated/`에 놓인다. **이 디렉터리는 git에 올리지 않고, 올려서도
-안 된다.** `package://`를 풀면서 mesh 경로가 절대 경로로 바뀌기 때문에
-(`/home/<사용자>/manipulation/mycobot_ros2/...`) 커밋해 봐야 다른 머신에서는
-존재하지 않는 경로를 가리킨다. 저작물이 아니라 파생물이고, 필요할 때 알아서
-만들어진다 — `build_mycobot_urdf()`가 디렉터리까지 생성하며, 벤더 파일이 출력물보다
-새로우면 다시 만든다. 따라서 clone 직후 `generated/`가 없는 것이 정상이다.
+선택적 `build_urdf` 명령으로 벤더 원본을 복구하면 결과는 저장소 안이 아니라
+`$XDG_CACHE_HOME/arc-mycobot/urdf/`에 놓인다
+(`XDG_CACHE_HOME`을 지정하지 않으면 `~/.cache/arc-mycobot/urdf/`).
+`package://`를 풀면서 mesh 경로가 이 머신의 절대 경로로 바뀌므로 커밋 대상이
+아니다. `build_mycobot_urdf()`는 벤더 URDF, 복구 코드, mesh 루트와 gripper
+모드의 서명이 바뀌면 캐시를 다시 만든다. Reach/lift 실행은 이 캐시를 읽지 않는다.
+
+### 카메라 + 그리퍼 결합 URDF
+
+`src/arc_mycobot/assets/robots/urdf/`의 `mycobot_280_jn_camera_gripper.urdf`는
+reach용 고정 그리퍼, `mycobot_280_jn_camera_gripper_parallel.urdf`는 lift용
+슬라이딩 평행 조다. 두 파일 모두 팔, 카메라 플랜지와 `camera_link`를 가진다.
+필요한 STL 30개는 `src/arc_mycobot/assets/robots/meshes/`에 있으며 mesh 참조는
+`../meshes/` 상대경로다. `mycobot_280.py`의 두 `UrdfFileCfg`와 CPU FK도
+이 패키지 파일을 직접 읽는다.
+
+이 자산은 `mycobot_curobo`의 2026-09-28 결합 URDF
+(SHA-256 `1a74f874b9a55612c9bdc81e32a08e9dc49c2c57c622ca2407922e7a92250b14`)
+를 이 저장소에 복사한 것이다. J6 flange 기준 `tool_mount`의 +45° yaw는
+실물의 관절각 0 자세를 정면에서 본 관찰이며, 카메라는 그리퍼에 대해 +90° yaw다.
+`camera_link`는 렌즈 중심의 추정 프레임으로, 광축 보정과 hand-eye calibration은
+아직 하지 않았다. STL은 Elephant Robotics `mycobot_description` mesh에서
+변환했으며, 배포 조건은 `meshes/LICENSE`에 보존했다.
+
+평행 조 변형은 기존 lift 모델의 편측 13.1 mm 이동과 두 box pad 충돌체를
+보존하고, 고정 그리퍼 파일의 카메라 장착 구조를 공유한다. 다른 link의 충돌체는
+없다. 예전 reach/lift 학습 수치는 카메라 없는 모델에서 얻은 값이므로 현재
+모델의 성능으로 해석하면 안 된다. 특히 lift의 시작 자세와 큐브 배치는 새
+장착각·카메라 두께에 맞춰 다시 검증해야 한다.
 
 ## reach task
 
@@ -161,6 +178,9 @@ ROS 아래에서만 해석하는 `package://` mesh URI도 함께 처리한다.
 않기 때문이다.
 
 ## reach 결과
+
+> [!warning] 아래 수치는 카메라 플랜지를 추가하기 전 모델의 기록이다. 새 패키지
+> 자산의 학습 성능이나 기존 checkpoint의 재현 성능으로 간주하지 않는다.
 
 RTX 5090, 4096 환경, seed 0에서 측정. task가 실제로 어디서 수렴하는지 보려고
 1500 iteration 전 구간(1004 s)을 돌렸다:
@@ -270,6 +290,9 @@ mimic prim 다섯 개가 생기지만 reference가 잡힌 것은 정확히 *하�
 
 ### lift 결과
 
+> [!warning] 아래 수치는 카메라 플랜지를 추가하기 전 평행 조 모델의 기록이다.
+> 새 자산으로 파지 성공률을 재측정하기 전까지 현재 성능을 뜻하지 않는다.
+
 4096 환경, seed 0, 1500 iteration을 483 s(8분)에:
 
 | iteration | 큐브 들림 | 큐브 목표 도달 | 평균 보상 |
@@ -282,14 +305,107 @@ mimic prim 다섯 개가 생기지만 reference가 잡힌 것은 정확히 *하�
 제어 스텝의 비율로 읽으면 된다. 큐브는 시간의 94%를 60 mm 위에서, 84%를 목표
 근처에서 보낸다. 곡선이 꺾이지 않으므로 마지막 checkpoint를 그대로 쓸 수 있다.
 
+## visual align task
+
+`Isaac-Visual-Align-MyCobot280JN-v0`는 packaged URDF의 `camera_link`에
+`TiledCamera`를 붙인다. 128×128 RGB에서 빨간 표식의 box를 검출하지만
+정책에는 RGB나 depth를 넣지 않는다. Box 5값은 꼭짓점 5개가 아니라
+정규화된 `(cx, cy, w, h, detected)`이다. 앞 네 값은 box 중심과 크기,
+마지막 값은 검출 유효성이다. 관절 위치·속도 12개와 이전 action 5개를
+합쳐 정책 입력은 22개 값이다.
+
+기본 자세는 J6(`joint6output_to_joint6`)만 `-pi/4`이고 다른 팔 관절은
+0이다. J6은 카메라 영상의 45° 기울기를 바로잡으며 에피소드 중에도
+고정한다. 5개 arm action에는 J6이 들어가지 않는다. 40 mm 빨간 큐브는
+수평 카메라 앞에 두고 영상 가로·세로에 대응하는 Y/Z 시작 위치를 각각
+±50 mm 바꾼다. 충돌 없는 kinematic 표식이며 Y/Z에서 진폭 25 mm,
+주파수 0.10/0.13 Hz로 천천히 움직인다. 카메라 far clip은 0.6 m다.
+
+보상은 box 검출·중앙 정렬·중앙 도달과 작은 action 변화·관절 속도
+벌점으로 구성된다. 표식의 월드 좌표는 정책이나 보상에 넣지 않는다.
+중력은 미보정 서보의 처짐을 분리하기 위해 꺼 둔다.
+
+```bash
+uv run train --task Isaac-Visual-Align-MyCobot280JN-v0 --num_envs 64 --headless --enable_cameras --max_iterations 300
+uv run visual_align_eval --num_envs 64 --steps 90 --seed 20260930
+uv run visual_align_eval --checkpoint logs/rsl_rl/visual_align_mycobot_280_jn_moving_box/2026-09-29_19-21-02/model_299.pt --num_envs 64 --steps 90 --seed 20260930 --image /tmp/visual-align-moving.png
+```
+
+현재 자세와 보상에서 학습한 checkpoint는 로컬
+`logs/rsl_rl/visual_align_mycobot_280_jn_moving_box/2026-09-29_19-21-02/model_299.pt`에
+있다. 64개 환경, PPO 300 iteration이다. 학습에 쓰지 않은 두 seed에서
+90 step(3 s) 평가 후 마지막 20 step을 집계했다. 정렬 기준은 box 중심의
+정규화 거리 `<0.1`(128×128 영상에서 약 6.4 pixel)이다.
+
+| 평가 seed | zero action 정렬률 | PPO 정렬률 | PPO 평균 중심 오차 | 큐브 평균 이동 경로 |
+| --- | ---: | ---: | ---: | ---: |
+| 20260930 | 8.0% | 100% | 0.0102 | 5.08 cm |
+| 20260931 | 6.0% | 100% | 0.0099 | 5.08 cm |
+
+두 평가에서 표식 검출률은 100%였다. 같은 환경의 연속 프레임을
+집계한 값이라 독립 episode 성공률은 아니다. 옛 자세와 보상에서 학습한
+`visual_align_mycobot_280_jn_moving_xy`와 고정 큐브 checkpoint는
+현재 환경에 재사용하지 않는다.
+
+현재 검출기는 빨간색 임계값이다. 실물의 사람 손은 Open Images V7에
+사전 학습된 `yolov8n-oiv7.pt`의 `Human hand` 클래스(267)를 사용해
+추가 학습 없이 먼저 검출할 수 있다. [Ultralytics의 모델·클래스 문서](https://docs.ultralytics.com/datasets/detect/open-images-v7).
+`model.predict(frame, classes=[267])`의 `Results`는 기존
+`vision/yolo_boxes.py`에서 box 5값으로 변환할 수 있다. 실제 손목 카메라의
+검출 성능, 지연, 누락, 렌즈 보정과 관절 구동은 아직 검증하지 않았다.
+
+
+## YOLO Human hand visual align task
+
+`Isaac-Visual-Align-YOLO-Hand-MyCobot280JN-v0`는 위 빨간 표식 과제와
+별개다. `assets/targets/hand_photo.usda`의 사진 표적을 손목 `TiledCamera`로
+렌더링하고, 사전 학습된 Open Images V7 `yolov8n-oiv7.pt`를 **재학습 없이**
+사용한다. 추론 결과는 `classes=[267]`로 `Human hand`만 남긴다. 모델은
+카메라 RGB 256×256을 320×320으로 키워 추론한다. PPO에는 RGB가 아닌
+`(cx, cy, w, h, detected)` 5값과 관절 상태·이전 action만 들어간다.
+검출·중앙 정렬 보상도 같은 YOLO box를 사용한다. 손목 J6은 `-pi/4`로
+고정하고 나머지 다섯 관절을 제어한다. 사진 표적은 Y/Z에서 천천히
+움직인다. YOLO 가중치는 처음 실행 때 XDG cache 아래에 받으며
+`ARC_MYCOBOT_YOLO_WEIGHTS`로 경로를 지정할 수도 있다.
+
+```bash
+uv sync --extra yolo
+uv run --extra yolo train --task Isaac-Visual-Align-YOLO-Hand-MyCobot280JN-v0 --num_envs 32 --headless --enable_cameras --max_iterations 300 --seed 20260929
+uv run --extra yolo visual_align_eval --task Isaac-Visual-Align-YOLO-Hand-MyCobot280JN-v0 --checkpoint logs/rsl_rl/visual_align_mycobot_280_jn_yolo_hand/2026-09-29_19-54-30/model_299.pt --num_envs 32 --steps 90 --seed 20260930
+```
+
+32환경 PPO 300 iteration을 281초 학습했다. 최종 checkpoint는 위
+로컬 경로에 있으며 SHA-256은
+`24b92b031a4221d27b0372a84f80337adf23a04c095efc48a856127c88d363e2`다.
+다음은 학습에 사용하지 않은 seed에서 90 step을 실행하고 마지막 20 step을
+집계한 결과다. 중앙 정렬은 정규화 box 중심 오차 `<0.1`(256×256 영상에서
+약 12.8 pixel)로 정의했다.
+
+| 평가 seed | 영점 action 정렬률 | PPO 정렬률 | PPO 평균 중심 오차 | PPO 손 검출률 |
+| --- | ---: | ---: | ---: | ---: |
+| 20260930 | 7.7% | 100% | 0.0070 | 99.97% |
+| 20260931 | 0.9% | 100% | 0.0076 | 100% |
+
+각 환경의 연속 프레임은 독립 episode가 아니다. 단일 환경의 동기화된
+시뮬레이션·손목 카메라 영상(30 FPS, 109프레임)에서 손 box 중심은
+`(0.470, 0.153)`에서 `(-0.0038, -0.0003)`으로 이동했고 표적은 약
+6.19 cm 움직였다. 영상에는 실제 YOLO box를 그렸다. 대상은 생성한
+**평면 손 사진** 한 장이다. 손의 3D 형상, 다양한 사람·조명·가림,
+실물 카메라의 검출 지연과 팔 구동은 아직 검증하지 않았다. 따라서
+이 정책의 실물 손 추종 성공을 뜻하지 않는다.
+
 ## 구조
 
 ```
 src/arc_mycobot/
 ├── assets/robots/
-│   ├── mycobot_urdf.py        # 벤더 URDF 복구 + 모든 구조 상수
-│   └── mycobot_280.py         # MYCOBOT_280_JN_CFG / _LIFT_CFG: spawn, actuator, gain
-├── kinematics/urdf_fk.py      # 복구 URDF 기반 numpy FK; Isaac import 없음
+│   ├── camera_gripper_assets.py  # 실행 URDF의 CPU-safe 경로
+│   ├── urdf/                     # 고정 그리퍼 / 평행 조 버전
+│   ├── meshes/                   # 상대경로 STL + 벤더 라이선스
+│   ├── mycobot_urdf.py           # 벤더 복구 도구 + 구조 상수
+│   └── mycobot_280.py            # 두 패키지 URDF의 spawn, actuator, gain
+├── kinematics/urdf_fk.py      # 패키지 URDF 기반 numpy FK; Isaac import 없음
+├── vision/{boxes,yolo_boxes}.py # RGB 표식 및 YOLO box의 공통 관측 형식
 ├── tasks/reach/
 │   ├── reach_env_cfg.py       # 로봇 무관 베이스 (scene, MDP, 60 Hz)
 │   ├── mdp/                   # 프레임워크 항 + 성공 지표 + 목표 관측
@@ -304,10 +420,16 @@ src/arc_mycobot/
 │       ├── geometry.py        # 큐브·스폰·목표·파지점 — 역시 Isaac 비의존
 │       ├── joint_pos_env_cfg.py
 │       └── agents/rsl_rl_ppo_cfg.py
+├── tasks/visual_align/
+│   ├── visual_align_env_cfg.py # RGB box 관측·중앙 정렬 보상
+│   ├── mdp/                    # 카메라 box 관측·보상
+│   └── config/mycobot/
+│       ├── joint_pos_env_cfg.py # TiledCamera와 표식 큐브
+│       └── agents/rsl_rl_ppo_cfg.py
 └── scripts/
     ├── rsl_rl/{train,play}.py
     ├── environments/{zero_agent,random_agent,list_envs}.py
-    └── tools/workspace_sweep.py
+    └── tools/{workspace_sweep,visual_align_eval}.py
 ```
 
 구조를 지탱하는 경계가 둘 있다:
