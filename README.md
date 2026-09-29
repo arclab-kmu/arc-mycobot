@@ -98,8 +98,11 @@ uv run train --task Isaac-Reach-MyCobot280JN-v0 --headless --num_envs 64 --max_i
 | DOF | revolute 6개, `joint2_to_joint1` … `joint6output_to_joint6` |
 | root link | `joint1` — 고정 베이스이자 목표가 표현되는 프레임 |
 | 추종 body | `joint6_flange` — TCP가 아니라 공구 flange |
-| 질량 | 기존 카메라 없는 모델의 측정값은 0.968 kg. 새 카메라 결합 모델의 PhysX 질량은 다시 측정해야 한다. |
+| 질량 | 패키지 URDF 명목 합계 1.200 kg = Jetson Nano 팔 1.030 kg + adaptive gripper 0.110 kg + Camera Flange 2.0 0.060 kg. 카메라 없는 생성 URDF는 1.140 kg. 링크별 분배·관성·실제 USB 카메라 무게는 미측정. |
 | 도달 범위 | flange 기준 수평 302 mm, `z` ∈ [−103, +447] mm |
+
+이 질량 변경 이전에 학습한 checkpoint의 동역학은 현재 URDF와 다르다. 시뮬레이션
+평가를 다시 수행한 뒤 재학습 필요성을 판단해야 한다.
 
 벤더는 자기 **link**들을 `joint1` … `joint6`이라고 부른다. 헷갈리지만 그쪽 것이다.
 이름을 바꾸면 이 저장소와 `mycobot_ros2`가 영구히 어긋난다. link는 `jointN`,
@@ -486,10 +489,13 @@ src/arc_mycobot/
 코드에 `TODO(unverified)`로 표시해 두었다. 여기서 나오는 숫자를 믿기 전에 알아 둘
 것들이다:
 
-* **link별 질량과 관성.** Elephant Robotics는 총 질량(850 g), 가반하중(250 g),
-  작업 반경을 공개하지만 link별 분배도 관성 텐서도 공개하지 않는다. 여기 질량은
-  직렬 팔의 통상적인 테이퍼로 분배해 공개된 총합에 맞춘 것이고, 관성은 회전 반경
-  30 mm의 등방 구 근사다. 자릿수와 총합은 맞지만 토크 수준의 작업에는 부족하다.
+* **link별 질량과 관성.** Elephant Robotics의 [SKU 4010100018 사양](https://americas.shop.elephantrobotics.com/collections/all-robotic-products/products/mycobot-280-jetson-nano)은 Jetson Nano 팔 1.030 kg,
+  [adaptive gripper 사양](https://docs.elephantrobotics.com/docs/mycobot_280_jn_en/4-SupportAndService/Accessories/AdaptiveGripper.html)은 0.110 kg,
+  [Camera Flange 2.0 사양](https://www.elephantrobotics.com/en/mycobot-camera-flange-en/)은 0.060 kg이다.
+  링크별 분배와 관성 텐서는 공개되지 않아, 기존 가동 링크 추정치를 유지하고 팔의 추가
+  0.180 kg을 베이스에 배분했다. 관성은 회전 반경 30 mm의 등방 구 근사다.
+  카메라 플랜지의 0.060 kg은 해당 제품을 사용한다는 가정이며 실제 USB 카메라·케이블의
+  질량과 플랜지 중심 질량 위치는 측정하지 않았다. 토크 수준의 sim-to-real에는 부족하다.
 * **joint 강성·감쇠·토크 한계.** 서보 게인은 공개되어 있지 않다. 여기 값들은
   측정한 것이 아니라 고른 것이다. 측정한 것은 그 *효과* 쪽이다 — 홈 자세를 유지할
   때 최악의 정상상태 중력 처짐이 어깨에서 32.8 mrad이고, 그만큼 flange가 순기구학이

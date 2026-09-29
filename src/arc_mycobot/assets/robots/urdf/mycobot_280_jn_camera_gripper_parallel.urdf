@@ -10,8 +10,8 @@
         </visual>
         <inertial>
             <origin xyz="0 0 0" rpy="0 0 0" />
-            <mass value="0.240000" />
-            <inertia ixx="8.64e-05" ixy="0" ixz="0" iyy="8.64e-05" iyz="0" izz="8.64e-05" />
+            <mass value="0.420000" />
+            <inertia ixx="0.0001512" ixy="0" ixz="0" iyy="0.0001512" iyz="0" izz="0.0001512" />
         </inertial>
     </link>
     <link name="joint2">
@@ -148,8 +148,8 @@
         </visual>
         <inertial>
             <origin xyz="0 0 0" rpy="0 0 0" />
-            <mass value="0.070000" />
-            <inertia ixx="2.52e-05" ixy="0" ixz="0" iyy="2.52e-05" iyz="0" izz="2.52e-05" />
+            <mass value="0.062000" />
+            <inertia ixx="2.232e-05" ixy="0" ixz="0" iyy="2.232e-05" iyz="0" izz="2.232e-05" />
         </inertial>
     </link>
     <link name="gripper_left1">
@@ -277,6 +277,11 @@
         <origin xyz="0 0 0" rpy="0 0 1.5708" />
     </joint>
     <link name="camera_flange">
+        <inertial>
+            <origin xyz="0.024 -0.008 0.0" rpy="0 0 0" />
+            <mass value="0.060000" />
+            <inertia ixx="2.16e-05" ixy="0" ixz="0" iyy="2.16e-05" iyz="0" izz="2.16e-05" />
+        </inertial>
         <visual>
             <origin xyz="0.024 -0.008 0.0" rpy="0 3.14159 0" />
             <geometry>

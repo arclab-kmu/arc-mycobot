@@ -123,9 +123,9 @@ def test_every_link_has_positive_mass_and_inertia(robot):
 
 
 def test_total_mass_matches_the_published_figure(robot):
-    """0.85 kg arm + ~0.11 kg gripper. Guards against a typo in _LINK_MASSES."""
+    """Jetson Nano SKU 4010100018: 1.03 kg arm + 0.11 kg gripper."""
     total = sum(float(link.find("inertial/mass").attrib["value"]) for link in robot.findall("link"))
-    assert total == pytest.approx(0.968, abs=0.05)
+    assert total == pytest.approx(1.140, abs=1e-6)
 
 
 def test_all_mesh_paths_are_absolute_and_exist(robot):

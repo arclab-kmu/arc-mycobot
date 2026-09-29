@@ -34,6 +34,26 @@ def test_packaged_meshes_and_camera_mount(path: Path):
     assert float(mount.attrib["rpy"].split()[2]) == pytest.approx(math.pi / 4, abs=1e-5)
 
 
+@pytest.mark.parametrize("path", [CAMERA_GRIPPER_URDF, CAMERA_GRIPPER_PARALLEL_URDF])
+def test_packaged_mass_matches_component_specs(path: Path):
+    """SKU 4010100018 arm + adaptive gripper + camera-flange nominal masses."""
+    root = ET.parse(path).getroot()
+    masses = {}
+    for link in root.findall("link"):
+        mass = link.find("inertial/mass")
+        if mass is not None:
+            masses[link.attrib["name"]] = float(mass.attrib["value"])
+    arm = sum(mass for name, mass in masses.items() if name.startswith("joint"))
+    gripper = sum(mass for name, mass in masses.items() if name.startswith("gripper"))
+    assert arm == pytest.approx(1.030, abs=1e-6)
+    assert gripper == pytest.approx(0.110, abs=1e-6)
+    assert masses["camera_flange"] == pytest.approx(0.060, abs=1e-6)
+    assert sum(masses.values()) == pytest.approx(1.200, abs=1e-6)
+    inertia = root.find("link[@name='camera_flange']/inertial/inertia")
+    assert inertia is not None
+    assert all(float(inertia.attrib[axis]) > 0 for axis in ("ixx", "iyy", "izz"))
+
+
 def test_reach_and_lift_have_distinct_jaws():
     reach = ET.parse(CAMERA_GRIPPER_URDF).getroot()
     lift = ET.parse(CAMERA_GRIPPER_PARALLEL_URDF).getroot()

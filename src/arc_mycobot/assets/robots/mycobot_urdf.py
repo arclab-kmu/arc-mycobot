@@ -417,13 +417,14 @@ _GRIPPER_JOINTS = (
 # The vendor URDF has no <inertial> at all, so these are *authored here*, not
 # imported. Sources and method:
 #
-#   * The myCobot 280 weighs 850 g in total and its payload is 250 g
-#     (Elephant Robotics spec sheet); the adaptive gripper adds about 110 g.
-#   * That 850 g is distributed across the six arm links by the usual taper for
-#     a serial arm -- heavier near the base where the larger servos and the
-#     Jetson carrier sit, lighter toward the wrist -- normalized to sum to 850 g.
-#   * The gripper's 110 g is split 70 g on the body and 8 g on each of the five
-#     moving fingers. Because the cluster is welded (see GRIPPER_FIXED_AT) and
+#   * Elephant Robotics lists 1030 g for Jetson Nano SKU 4010100018, versus
+#     850 g for the generic 280/M5 model. The extra 180 g is assigned to joint1
+#     (Jetson carrier/base), leaving the previous moving-link estimates intact.
+#     https://americas.shop.elephantrobotics.com/collections/all-robotic-products/products/mycobot-280-jetson-nano
+#   * The model-specific adaptive gripper specification gives 110 g. Its six
+#     moving links remain estimated at 8 g each, leaving 62 g for gripper_base.
+#     https://docs.elephantrobotics.com/docs/mycobot_280_jn_en/4-SupportAndService/Accessories/AdaptiveGripper.html
+#   * Because the cluster is welded (see GRIPPER_FIXED_AT) and
 #     `merge_fixed_joints` folds them into the flange, only the *total* and the
 #     combined centre of mass actually reach PhysX.
 #
@@ -432,14 +433,14 @@ _GRIPPER_JOINTS = (
 # number, which is what a position-reach task with implicit PD actuators needs;
 # it is not good enough for torque-level sim-to-real.
 _LINK_MASSES = {
-    "joint1": 0.240,
+    "joint1": 0.420,
     "joint2": 0.190,
     "joint3": 0.150,
     "joint4": 0.110,
     "joint5": 0.090,
     "joint6": 0.050,
     "joint6_flange": 0.020,
-    "gripper_base": 0.070,
+    "gripper_base": 0.062,
     "gripper_left1": 0.008,
     "gripper_left2": 0.008,
     "gripper_left3": 0.008,
