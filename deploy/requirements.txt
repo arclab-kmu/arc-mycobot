@@ -1,0 +1,5 @@
+# Install a JetPack-compatible torch/torchvision build before these packages.
+# The mycobot-control checkout is installed separately with its [arm] extra.
+numpy>=1.23,<2
+ultralytics>=8.3,<9
+huggingface-hub>=0.26,<1

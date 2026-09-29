@@ -53,7 +53,7 @@ ignore = [
 docstring-code-format = true
 
 [tool.pyright]
-include = ["src", "tests"]
+include = ["src", "deploy", "tests"]
 venvPath = "."
 venv = ".venv"
 exclude = [
@@ -78,6 +78,7 @@ reportPrivateUsage = "warning"
 
 [tool.pytest.ini_options]
 addopts = "-v"
+pythonpath = ["."]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]

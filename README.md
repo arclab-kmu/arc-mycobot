@@ -424,6 +424,13 @@ not been validated as safe commands for the physical robot. The reusable
 `HandAlignPolicy.predict` API accepts one uint8 HWC RGB frame and the same
 joint state in radians.
 
+## Jetson Nano sim-to-real hand policy
+
+JetPack 4.6 / Python 3.8용 독립 실행 코드는 [`deploy/README.md`](deploy/README.md)에 있다.
+Hugging Face의 checkpoint를 검증해 내려받고 USB 카메라·YOLO·관절 피드백으로
+정책을 실행한다. 기본은 read-only preview이며 `--execute`에서만
+`mycobot-control`의 제어 gate를 통해 제한된 관절 명령을 보낸다.
+
 ## 구조
 
 ```
