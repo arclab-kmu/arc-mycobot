@@ -33,9 +33,9 @@ def annotated_frame(rgb, prediction, mode, observation_age_s):
         x2 = int(((cx + 1.0) + box_width) * width / 2.0)
         y2 = int(((cy + 1.0) + box_height) * height / 2.0)
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        label = "YOLO: Human hand"
+        label = f"YOLO: hand {prediction.confidence:.2f}"
     else:
-        label = "YOLO: no Human hand"
+        label = f"YOLO: no hand (best {prediction.confidence:.2f})"
     cv2.putText(frame, label, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
     cv2.putText(
         frame,

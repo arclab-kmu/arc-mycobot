@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import cv2
@@ -11,7 +12,7 @@ import numpy as np
 import torch
 
 from deploy.arm import ArmConfig, ArmSession, require_pymycobot
-from deploy.controller import Limits, UnsafeTarget, check_start, plan_target
+from deploy.controller import Limits, TargetSmoother, UnsafeTarget, check_start, plan_target
 from deploy.preview import BrowserPreview
 from deploy.runtime import CHECKPOINT_NAME, HF_REPO, HF_REVISION, HandPolicyRuntime, resolve_checkpoint
 
@@ -21,6 +22,9 @@ MAX_FEEDBACK_LATENCY_S = 0.5
 MAX_VELOCITY_DEG_S = 120.0
 COMMAND_SPEED = 10
 HAND_REACQUIRE_FRAMES = 2
+COMMAND_STEP_DEG = 0.6
+MAX_POLICY_VELOCITY_DEG_S = 30.0
+VELOCITY_FILTER_ALPHA = 0.35
 
 
 def rgb_frame(bgr, rotate=0, flip_x=False, flip_y=False):
@@ -60,7 +64,13 @@ def run_offline(args, runtime):
     )
     print(
         json.dumps(
-            {"box": prediction.box, "policy_action": prediction.action, "simulation_target_deg": prediction.target_deg},
+            {
+                "box": prediction.box,
+                "policy_box": prediction.policy_box,
+                "hand_confidence": prediction.confidence,
+                "policy_action": prediction.action,
+                "simulation_target_deg": prediction.target_deg,
+            },
             indent=2,
         )
     )
@@ -87,6 +97,8 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
     last_angles = None
     last_feedback_at = None
     previous_action = [0.0] * 5
+    filtered_velocities = [0.0] * 6
+    target_smoother = TargetSmoother()
     hand_streak = 0
     preview = BrowserPreview(args.web_preview_port) if args.web_preview_port is not None else None
     try:
@@ -96,7 +108,9 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
             try:
                 for index in range(args.max_frames or 2**63):
                     cycle_start = time.monotonic()
+                    status_started = time.monotonic()
                     status = arm.read_status()
+                    status_read_s = time.monotonic() - status_started
                     if args.execute and (status is None or not status.is_normal):
                         raise UnsafeTarget(
                             f"arm status is not normal: {'unavailable' if status is None else status.describe()}"
@@ -106,16 +120,23 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
                     if not ok:
                         raise RuntimeError("camera read failed")
                     frame_at = time.monotonic()
+                    joints_started = time.monotonic()
                     reading = arm.read_joints(retry_s=0.2)
                     feedback_at = time.monotonic()
+                    joint_read_s = feedback_at - joints_started
                     if args.execute and last_angles is None:
                         check_start(reading.angles)
                     dt = 0.0 if last_feedback_at is None else feedback_at - last_feedback_at
-                    velocities = joint_velocities(reading.angles, last_angles, dt)
+                    raw_velocities = joint_velocities(reading.angles, last_angles, dt)
+                    filtered_velocities = [
+                        (1.0 - VELOCITY_FILTER_ALPHA) * previous
+                        + VELOCITY_FILTER_ALPHA * max(-MAX_POLICY_VELOCITY_DEG_S, min(MAX_POLICY_VELOCITY_DEG_S, raw))
+                        for previous, raw in zip(filtered_velocities, raw_velocities)
+                    ]
                     last_angles, last_feedback_at = list(reading.angles), feedback_at
                     rgb = rgb_frame(bgr, args.rotate, args.flip_x, args.flip_y)
                     inference_started = time.monotonic()
-                    prediction = runtime.predict(rgb, reading.angles, velocities, previous_action)
+                    prediction = runtime.predict(rgb, reading.angles, filtered_velocities, previous_action)
                     age = time.monotonic() - min(feedback_at, frame_at)
                     camera_read_s = frame_at - capture_started
                     inference_s = time.monotonic() - inference_started
@@ -123,9 +144,12 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
                     hand_detected = prediction.box[4] == 1.0
                     hand_streak = hand_streak + 1 if hand_detected else 0
                     hold_reason = None
+                    filtered_target = None
+                    target_clipped = any(abs(value) > Limits().envelope_degrees for value in prediction.target_deg[:5])
                     if args.execute and not hand_detected:
                         hold_reason = "Human hand not detected"
                         arm.halt(hold_reason)
+                        target_smoother.reset()
                         previous_action = [0.0] * 5
                     elif args.execute and hand_streak < HAND_REACQUIRE_FRAMES:
                         hold_reason = "Waiting for consecutive hand detections"
@@ -136,8 +160,12 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
                                 f"camera read {camera_read_s:.3f} s, inference {inference_s:.3f} s); "
                                 "no command sent; check read-only preview timing"
                             )
+                        filtered_target, target_clipped = target_smoother.update(prediction.target_deg, reading.angles)
                         if hand_streak >= HAND_REACQUIRE_FRAMES:
-                            target = plan_target(prediction, reading.angles)
+                            filtered_prediction = replace(prediction, target_deg=filtered_target)
+                            target = plan_target(
+                                filtered_prediction, reading.angles, Limits(max_step_degrees=COMMAND_STEP_DEG)
+                            )
                             arm.gate.open("fresh hand detection and joint feedback")
                             try:
                                 arm.command_joints(target, measured=reading)
@@ -160,14 +188,23 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
                             {
                                 "frame": index,
                                 "box": prediction.box,
+                                "policy_box": prediction.policy_box,
+                                "hand_confidence": prediction.confidence,
                                 "angles_deg": reading.angles,
+                                "joint_velocity_deg_s": [round(value, 3) for value in filtered_velocities],
                                 "policy_action": prediction.action,
+                                "policy_target_deg": prediction.target_deg,
+                                "filtered_target_deg": filtered_target,
+                                "target_clipped": target_clipped,
                                 "sent_target_deg": target,
                                 "motion_state": motion_state,
                                 "hold_reason": hold_reason,
                                 "observation_age_s": round(age, 3),
                                 "camera_read_s": round(camera_read_s, 3),
+                                "status_read_s": round(status_read_s, 3),
+                                "joint_read_s": round(joint_read_s, 3),
                                 "inference_s": round(inference_s, 3),
+                                "cycle_work_s": round(time.monotonic() - cycle_start, 3),
                                 "status": None if status is None else status.describe(),
                             }
                         ),
@@ -200,6 +237,7 @@ def cli():
     parser.add_argument("--hf-revision", default=HF_REVISION)
     parser.add_argument("--hf-file", default=CHECKPOINT_NAME)
     parser.add_argument("--yolo-weights", help="local YOLO weights; default is XDG cache")
+    parser.add_argument("--yolo-confidence", type=float, help="hand detection threshold; log shows best confidence")
     parser.add_argument(
         "--angles-deg", type=float, nargs=6, default=[0, 0, 0, 0, 0, -45], help="offline-image pose only"
     )
@@ -217,13 +255,17 @@ def cli():
         parser.error("--web-preview-port must be between 1 and 65535")
     if args.image is not None and args.web_preview_port is not None:
         parser.error("--web-preview-port requires the live camera")
+    if args.yolo_confidence is not None and not 0.01 <= args.yolo_confidence <= 1.0:
+        parser.error("--yolo-confidence must be between 0.01 and 1.0")
     try:
         if args.image is None:
             require_pymycobot()
     except RuntimeError as exc:
         parser.exit(2, f"{exc}\n")
     checkpoint = resolve_checkpoint(args.checkpoint, args.hf_repo, args.hf_revision, args.hf_file)
-    runtime = HandPolicyRuntime(checkpoint, device=args.device, yolo_weights=args.yolo_weights)
+    runtime = HandPolicyRuntime(
+        checkpoint, device=args.device, yolo_weights=args.yolo_weights, yolo_confidence=args.yolo_confidence
+    )
     if args.image is not None:
         run_offline(args, runtime)
     else:
