@@ -12,7 +12,7 @@ PAGE = b"""<!doctype html>
 <style>body{background:#111;color:#eee;font:16px sans-serif;margin:24px}
 img{max-width:min(90vw,720px);image-rendering:auto}p{max-width:720px}</style>
 <h1>myCobot hand preview</h1>
-<p>Green: YOLO Human hand box. White: camera center. Motion requires --execute.</p>
+<p>Green: YOLO Human hand box. White: camera center. STOPPED means restart is required before any motion.</p>
 <img id="frame" alt="Waiting for camera frame">
 <script>const frame=document.getElementById('frame');
 function refresh(){frame.onload=()=>setTimeout(refresh,200);
@@ -20,7 +20,7 @@ frame.onerror=()=>setTimeout(refresh,500);
 frame.src='/frame.jpg?t='+Date.now()}refresh()</script></html>"""
 
 
-def annotated_frame(rgb, prediction, execute, observation_age_s):
+def annotated_frame(rgb, prediction, mode, observation_age_s):
     """Draw the class-267 box on the exact square crop passed to YOLO."""
     frame = cv2.cvtColor(rgb.numpy(), cv2.COLOR_RGB2BGR)
     height, width = frame.shape[:2]
@@ -36,7 +36,6 @@ def annotated_frame(rgb, prediction, execute, observation_age_s):
     else:
         label = "YOLO: no Human hand"
     cv2.putText(frame, label, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
-    mode = "EXECUTE" if execute else "PREVIEW"
     cv2.putText(
         frame,
         f"{mode}  age {observation_age_s:.2f}s",
@@ -92,8 +91,8 @@ class BrowserPreview:
         self._thread.start()
         return f"http://127.0.0.1:{self._server.server_port}"
 
-    def publish(self, rgb, prediction, execute, observation_age_s):
-        frame = annotated_frame(rgb, prediction, execute, observation_age_s)
+    def publish(self, rgb, prediction, mode, observation_age_s):
+        frame = annotated_frame(rgb, prediction, mode, observation_age_s)
         ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
         if not ok:
             raise RuntimeError("could not encode browser preview frame")

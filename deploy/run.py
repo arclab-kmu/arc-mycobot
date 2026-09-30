@@ -86,6 +86,8 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
     last_angles = None
     last_feedback_at = None
     previous_action = [0.0] * 5
+    motion_enabled = args.execute
+    disarm_reason = None
     preview = BrowserPreview(args.web_preview_port) if args.web_preview_port is not None else None
     try:
         if preview is not None:
@@ -117,11 +119,12 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
                     age = time.monotonic() - min(feedback_at, frame_at)
                     camera_read_s = frame_at - capture_started
                     inference_s = time.monotonic() - inference_started
-                    if preview is not None:
-                        preview.publish(rgb, prediction, args.execute, age)
-                        age = time.monotonic() - min(feedback_at, frame_at)
                     target = None
-                    if args.execute:
+                    if motion_enabled and prediction.box[4] != 1.0:
+                        disarm_reason = "Human hand not detected; restart --execute after preview detects one"
+                        arm.halt(disarm_reason)
+                        motion_enabled = False
+                    if motion_enabled:
                         if age > MAX_OBSERVATION_AGE_S:
                             raise UnsafeTarget(
                                 f"observation is stale ({age:.3f} s; "
@@ -135,6 +138,9 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
                         finally:
                             arm.gate.close("one policy command sent")
                         previous_action = list(prediction.action)
+                    motion_state = "preview" if not args.execute else "tracking" if motion_enabled else "stopped"
+                    if preview is not None:
+                        preview.publish(rgb, prediction, motion_state.upper(), age)
                     print(
                         json.dumps(
                             {
@@ -143,6 +149,8 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
                                 "angles_deg": reading.angles,
                                 "policy_action": prediction.action,
                                 "sent_target_deg": target,
+                                "motion_state": motion_state,
+                                "disarm_reason": disarm_reason,
                                 "observation_age_s": round(age, 3),
                                 "camera_read_s": round(camera_read_s, 3),
                                 "inference_s": round(inference_s, 3),

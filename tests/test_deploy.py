@@ -2,6 +2,7 @@
 
 import ast
 import builtins
+import json
 import sys
 import time
 import urllib.request
@@ -74,7 +75,8 @@ class FakeArm:
         self.commands.append(list(target))
 
     def halt(self, reason):
-        self.halts.append(reason)
+        if not self.halts:
+            self.halts.append(reason)
         self.gate.close(reason)
 
 
@@ -188,7 +190,7 @@ def test_browser_preview_serves_current_yolo_box():
     url = preview.start()
     try:
         prediction = Prediction((0.0, 0.0, 0.5, 0.5, 1.0), (0.0,) * 5, (0.0,) * 5 + (-45.0,))
-        preview.publish(torch.zeros((320, 320, 3), dtype=torch.uint8), prediction, False, 0.2)
+        preview.publish(torch.zeros((320, 320, 3), dtype=torch.uint8), prediction, "PREVIEW", 0.2)
         with urllib.request.urlopen(url) as response:
             assert b"myCobot hand preview" in response.read()
         with urllib.request.urlopen(url + "/frame.jpg") as response:
@@ -200,13 +202,35 @@ def test_browser_preview_serves_current_yolo_box():
         preview.close()
 
 
-def test_lost_hand_sends_no_command_and_stops_arm():
-    with pytest.raises(UnsafeTarget, match="not detected"):
-        run_camera(args(True), FakeRuntime(False), lambda **kw: SimpleNamespace(**kw), FakeArm, FakeCamera)
+def test_missing_hand_disarms_but_keeps_camera_running(capsys):
+    run_camera(args(True), FakeRuntime(False), lambda **kw: SimpleNamespace(**kw), FakeArm, FakeCamera)
     arm = FakeArm.last
     assert arm is not None
     assert arm.commands == []
-    assert arm.halts == ["deployment ended"]
+    assert arm.halts == ["Human hand not detected; restart --execute after preview detects one"]
+    frame = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert frame["motion_state"] == "stopped"
+    assert frame["sent_target_deg"] is None
+
+
+def test_lost_hand_stops_and_never_auto_rearms():
+    class IntermittentRuntime(FakeRuntime):
+        def __init__(self, detections):
+            super().__init__()
+            self.detections = iter(detections)
+
+        def predict(self, *_args):
+            detected = next(self.detections)
+            return Prediction((0, 0, 0.2, 0.2, float(detected)), (0.1,) * 5, (5, 0, 0, 0, 0, -45))
+
+    options = args(True)
+    options.max_frames = 3
+    run_camera(
+        options, IntermittentRuntime([True, False, True]), lambda **kw: SimpleNamespace(**kw), FakeArm, FakeCamera
+    )
+    arm = FakeArm.last
+    assert arm.commands == [[1.0, 0.0, 0.0, 0.0, 0.0, -45.0]]
+    assert arm.halts == ["Human hand not detected; restart --execute after preview detects one"]
 
 
 def test_slow_inference_sends_no_command_and_reports_timing(monkeypatch):

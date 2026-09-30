@@ -48,7 +48,7 @@ Jetson에서 브라우저를 연다면 `http://127.0.0.1:8765`로 접속한다. 
 python3 -m deploy.run --device cuda:0 --execute --web-preview-port 8765 --max-frames 50
 ```
 
-이전 `--max-frames 5` preview에서 팔이 움직이지 않는 것은 정상이다. 실행 모드의 terminal JSON에서 `box` 마지막 값이 `1.0`, `sent_target_deg`가 숫자 목록인지 확인한다. `angles_deg`는 실제 관절 피드백이다. `observation_age_s`가 매 프레임 1초 미만이고 로봇 상태가 정상일 때만 `--execute`를 시험한다. 검출된 손이 없으면 명령을 보내지 않고 멈춘다. 실행 모드에서도 `sent_target_deg`와 `angles_deg`가 거의 같으면 눈에 띄는 이동이 없을 수 있다.
+이전 `--max-frames 5` preview에서 팔이 움직이지 않는 것은 정상이다. 실행 모드의 terminal JSON에서 `box` 마지막 값이 `1.0`, `sent_target_deg`가 숫자 목록인지 확인한다. `angles_deg`는 실제 관절 피드백이다. `observation_age_s`가 매 프레임 1초 미만이고 로봇 상태가 정상일 때만 `--execute`를 시험한다. 검출된 손이 없으면 즉시 `stop()`을 요청하고 `motion_state: "stopped"`로 잠근다. 카메라와 YOLO browser view는 계속 갱신되지만, 손이 나중에 나타나도 자동으로 다시 움직이지 않는다. 손이 화면에 검출되는 것을 preview에서 확인한 뒤 `Ctrl+C`로 종료하고 새 `--execute` 실행을 시작한다. 실행 모드에서도 `sent_target_deg`와 `angles_deg`가 거의 같으면 눈에 띄는 이동이 없을 수 있다.
 
 카메라 방향이 예상과 다르면 `--rotate 90|180|270`, `--flip-x`, `--flip-y`를 preview에서 확인한다. 카메라 프레임은 중심을 정사각형으로 잘라 학습 때의 정사각형 영상 형식에 맞춘다. 종료는 `Ctrl+C`다.
 
