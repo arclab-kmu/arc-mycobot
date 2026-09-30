@@ -1,6 +1,6 @@
 # myCobot 280 JN hand-centering deployment
 
-이 폴더는 Isaac Lab 없이 Jetson Nano에서 손목 USB 카메라, 사전 학습 YOLO `Human hand`, PPO 정책, myCobot 280을 연결한다. Python 3.8 문법이다. 기본은 **preview**이며 카메라와 로봇 관절을 읽지만 이동 명령은 보내지 않는다. `--execute`를 넣어야만 이 폴더의 안전 검사를 거쳐 `pymycobot.send_angles`를 호출한다.
+이 폴더는 Isaac Lab 없이 Jetson Nano에서 손목 USB 카메라, YOLO `Human hand` 검출기, PPO 정책, myCobot 280을 연결한다. 기존 검출기는 공개된 Open Images YOLO 가중치이며, PPO 정책만 이 프로젝트에서 학습했다. Python 3.8 문법이다. 기본은 **preview**이며 카메라와 로봇 관절을 읽지만 이동 명령은 보내지 않는다. `--execute`를 넣어야만 이 폴더의 안전 검사를 거쳐 `pymycobot.send_angles`를 호출한다.
 
 ## Environment
 
@@ -48,7 +48,7 @@ Jetson에서 브라우저를 연다면 `http://127.0.0.1:8765`로 접속한다. 
 python3 -m deploy.run --device cuda:0 --execute --web-preview-port 8765 --max-frames 50
 ```
 
-이전 `--max-frames 5` preview에서 팔이 움직이지 않는 것은 정상이다. 실행 모드의 terminal JSON에서 `box` 마지막 값이 `1.0`, `sent_target_deg`가 숫자 목록인지 확인한다. `angles_deg`는 실제 관절 피드백이다. `observation_age_s`가 매 프레임 1초 미만이고 로봇 상태가 정상일 때만 `--execute`를 시험한다. 검출된 손이 없으면 즉시 `stop()`을 요청하고 `motion_state: "stopped"`로 잠근다. 카메라와 YOLO browser view는 계속 갱신되지만, 손이 나중에 나타나도 자동으로 다시 움직이지 않는다. 손이 화면에 검출되는 것을 preview에서 확인한 뒤 `Ctrl+C`로 종료하고 새 `--execute` 실행을 시작한다. 실행 모드에서도 `sent_target_deg`와 `angles_deg`가 거의 같으면 눈에 띄는 이동이 없을 수 있다.
+이전 `--max-frames 5` preview에서 팔이 움직이지 않는 것은 정상이다. 실행 모드의 terminal JSON에서 `box` 마지막 값이 `1.0`, `sent_target_deg`가 숫자 목록인지 확인한다. `angles_deg`는 실제 관절 피드백이다. `observation_age_s`가 매 프레임 1초 미만이고 로봇 상태가 정상일 때만 `--execute`를 시험한다. 검출된 손이 없으면 즉시 `stop()`을 요청하고 `motion_state: "waiting_for_hand"`로 대기한다. 카메라와 YOLO 화면은 계속 갱신된다. 손이 연속 두 프레임 검출되면 `motion_state: "tracking"`으로 돌아가 명령을 재개한다. 다시 놓치면 또 정지한다. 실행 모드에서도 `sent_target_deg`와 `angles_deg`가 거의 같으면 눈에 띄는 이동이 없을 수 있다.
 
 카메라 방향이 예상과 다르면 `--rotate 90|180|270`, `--flip-x`, `--flip-y`를 preview에서 확인한다. 카메라 프레임은 중심을 정사각형으로 잘라 학습 때의 정사각형 영상 형식에 맞춘다. 종료는 `Ctrl+C`다.
 
@@ -56,5 +56,32 @@ python3 -m deploy.run --device cuda:0 --execute --web-preview-port 8765 --max-fr
 
 - 관측은 손 box 5개, J1–J6 상대각·속도 각 6개, 이전 action 5개로 22개다. RGB는 YOLO에만 사용된다. 정책 출력은 J1–J5 **절대 관절 목표각**이다. J6 목표는 -45°로 고정하며 그리퍼 명령은 없다.
 - `--execute` 시작 시 J1–J5는 각각 ±10°, J6은 -45° ±3°여야 한다. 정책 목표와 관절 피드백은 J1–J5 ±30° 안에 있어야 하고, 한 번의 명령은 실측 각도에서 관절당 최대 1°만 이동한다. 속도 명령은 SDK 값 10, 목표 갱신 주기는 최대 5 Hz다.
-- 손 검출 실패, 비정상 로봇 상태, 오래된 관측(1초 초과), 관절 읽기 오류나 카메라 오류가 나면 추가 명령을 중단하고 `stop()`을 요청한다. 토크는 끄지 않는다. preview에서는 명령을 보내지 않는다. `deploy/arm.py`가 세션 동안 `/tmp/mycobot_lock`을 잡는다. 실행 모드에서는 `set_fresh_mode(1)`을 확인한 뒤 명령을 보낸다.
+- 손 검출 실패 시 `stop()`을 요청하고 손을 다시 찾을 때까지 명령을 보류한다. 비정상 로봇 상태, 오래된 관측(1초 초과), 관절 읽기 오류나 카메라 오류는 실행을 종료하고 `stop()`을 요청한다. 토크는 끄지 않는다. preview에서는 명령을 보내지 않는다. `deploy/arm.py`가 세션 동안 `/tmp/mycobot_lock`을 잡는다. 실행 모드에서는 `set_fresh_mode(1)`을 확인한 뒤 명령을 보낸다.
 - 이 제한은 소프트웨어 방어선이다. 학습은 한 장의 평면 손 사진과 시뮬레이션에 국한되어 실제 손, 카메라 보정, 지연, 관절 응답, 작업 공간 충돌은 검증하지 않았다. 실기 첫 시험에는 팔의 주변 공간과 정지 수단을 확보한다.
+
+## Train a hand detector
+
+기존 `yolov8n-oiv7.pt`는 [Open Images V7의 Human hand 클래스 267](https://docs.ultralytics.com/datasets/detect/open-images-v7/)를 그대로 사용한다. 손바닥 이외의 방향을 다루기 위해 [Ultralytics Hand Keypoints](https://docs.ultralytics.com/datasets/pose/hand-keypoints/)의 공개 train/val 이미지와 박스 라벨로 **한 클래스 검출기**를 fine-tune한다. 포즈 라벨의 첫 5개 값에서 box를 만들고 이미지 경계를 넘는 박스는 잘라낸다. 이것은 공개 데이터를 사용한 추가 학습이며 처음부터 데이터와 모델을 만든 것은 아니다. 데이터 사용 조건은 원본 페이지의 CC BY-NC-SA 4.0 및 구성 데이터 출처를 확인한다.
+
+CUDA가 있는 개발 PC에서 실행한다. 다운로드 파일과 학습 산출물은 Git에 추가하지 않는다.
+
+```bash
+curl -L --fail -o /tmp/hand-keypoints.zip https://github.com/ultralytics/assets/releases/download/v0.0.0/hand-keypoints.zip
+unzip -q /tmp/hand-keypoints.zip -d /tmp/hand-keypoints
+python -m deploy.train_hand_detector \
+  --pose-dataset /tmp/hand-keypoints \
+  --dataset-output /tmp/hand-detect-data \
+  --base-weights ~/.cache/arc-mycobot/weights/yolov8n-oiv7.pt \
+  --project /tmp/hand-detector-runs --device 0
+```
+
+학습 결과의 `hand-detect/weights/best.pt`를 Jetson으로 복사한 뒤 `--yolo-weights /path/to/best.pt`를 추가한다. 런타임은 기존 클래스 267과 새 한 클래스 모델의 클래스 0을 모두 받는다. 새 모델은 confidence 0.25, 기존 모델은 0.05를 사용한다. `--web-preview-port 8765`에서 실제 손바닥·손등·측면을 각각 확인하고 `inference_s`와 `observation_age_s`를 본 뒤 `--execute`를 사용한다. 공개 데이터 검증 수치는 실제 Jetson 카메라에서의 검출률을 보장하지 않는다.
+
+2026-09-30 학습본은 로컬 `outputs/arc-mycobot-yolo-hand-detector.pt`(6,205,098 bytes, SHA-256 `c6fe5de0c9708ab145c468d7215a681d5a6a2c0cce7ffb549943bdab4dc1a9de`)이다. 기존 Open Images 가중치에서 15 epoch 추가 학습했다. 가장 높은 검증 결과의 checkpoint는 14 epoch로, 공개 val 7,992장·7,992 box에서 precision 0.978, recall 0.984, mAP@0.5 0.992, mAP@0.5:0.95 0.888이었다. 같은 val에서 16장마다 한 장씩 뽑은 500장에 대해 실제 배포 confidence(기존 0.05, 새 모델 0.25)와 box IoU 0.5 기준을 적용하면 기존 172/500, 새 모델 490/500이 annotation에 맞았다. 이 데이터는 손이 있는 사진만 포함하므로 무손 프레임의 오검출률은 측정하지 못했다. Hojin이 보내 준 손바닥 화면 한 장에서는 새 모델과 기존 정책의 오프라인 추론이 성공했다. 손등·측면의 **Jetson 실물 검증은 아직 없다**.
+
+```bash
+python3 -m deploy.run --device cuda:0 --web-preview-port 8765 \
+  --yolo-weights /path/to/arc-mycobot-yolo-hand-detector.pt
+python3 -m deploy.run --device cuda:0 --execute --web-preview-port 8765 \
+  --yolo-weights /path/to/arc-mycobot-yolo-hand-detector.pt
+```

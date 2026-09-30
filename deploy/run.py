@@ -20,6 +20,7 @@ MAX_OBSERVATION_AGE_S = 1.0
 MAX_FEEDBACK_LATENCY_S = 0.5
 MAX_VELOCITY_DEG_S = 120.0
 COMMAND_SPEED = 10
+HAND_REACQUIRE_FRAMES = 2
 
 
 def rgb_frame(bgr, rotate=0, flip_x=False, flip_y=False):
@@ -86,8 +87,7 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
     last_angles = None
     last_feedback_at = None
     previous_action = [0.0] * 5
-    motion_enabled = args.execute
-    disarm_reason = None
+    hand_streak = 0
     preview = BrowserPreview(args.web_preview_port) if args.web_preview_port is not None else None
     try:
         if preview is not None:
@@ -120,25 +120,39 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
                     camera_read_s = frame_at - capture_started
                     inference_s = time.monotonic() - inference_started
                     target = None
-                    if motion_enabled and prediction.box[4] != 1.0:
-                        disarm_reason = "Human hand not detected; restart --execute after preview detects one"
-                        arm.halt(disarm_reason)
-                        motion_enabled = False
-                    if motion_enabled:
+                    hand_detected = prediction.box[4] == 1.0
+                    hand_streak = hand_streak + 1 if hand_detected else 0
+                    hold_reason = None
+                    if args.execute and not hand_detected:
+                        hold_reason = "Human hand not detected"
+                        arm.halt(hold_reason)
+                        previous_action = [0.0] * 5
+                    elif args.execute and hand_streak < HAND_REACQUIRE_FRAMES:
+                        hold_reason = "Waiting for consecutive hand detections"
+                    if args.execute and hand_detected:
                         if age > MAX_OBSERVATION_AGE_S:
                             raise UnsafeTarget(
                                 f"observation is stale ({age:.3f} s; "
                                 f"camera read {camera_read_s:.3f} s, inference {inference_s:.3f} s); "
                                 "no command sent; check read-only preview timing"
                             )
-                        target = plan_target(prediction, reading.angles)
-                        arm.gate.open("fresh hand detection and joint feedback")
-                        try:
-                            arm.command_joints(target, measured=reading)
-                        finally:
-                            arm.gate.close("one policy command sent")
-                        previous_action = list(prediction.action)
-                    motion_state = "preview" if not args.execute else "tracking" if motion_enabled else "stopped"
+                        if hand_streak >= HAND_REACQUIRE_FRAMES:
+                            target = plan_target(prediction, reading.angles)
+                            arm.gate.open("fresh hand detection and joint feedback")
+                            try:
+                                arm.command_joints(target, measured=reading)
+                            finally:
+                                arm.gate.close("one policy command sent")
+                            previous_action = list(prediction.action)
+                    motion_state = (
+                        "preview"
+                        if not args.execute
+                        else "waiting_for_hand"
+                        if not hand_detected
+                        else "acquiring_hand"
+                        if hold_reason
+                        else "tracking"
+                    )
                     if preview is not None:
                         preview.publish(rgb, prediction, motion_state.upper(), age)
                     print(
@@ -150,7 +164,7 @@ def run_camera(args, runtime, arm_config_type=ArmConfig, arm_session_type=ArmSes
                                 "policy_action": prediction.action,
                                 "sent_target_deg": target,
                                 "motion_state": motion_state,
-                                "disarm_reason": disarm_reason,
+                                "hold_reason": hold_reason,
                                 "observation_age_s": round(age, 3),
                                 "camera_read_s": round(camera_read_s, 3),
                                 "inference_s": round(inference_s, 3),

@@ -204,6 +204,7 @@ class ArmSession:
         ):
             raise UnsafeTarget("joint command exceeds feedback step limit")
         robot.send_angles(list(values), self.config.speed, _async=True)
+        self._halted = False
 
     def halt(self, reason="halt"):
         self.gate.close(reason)

@@ -18,6 +18,7 @@ from deploy.controller import UnsafeTarget, check_start, plan_target
 from deploy.preview import BrowserPreview
 from deploy.run import cli, rgb_frame, run_camera
 from deploy.runtime import Prediction, box_from_results, verify_checkpoint
+from deploy.train_hand_detector import prepare_detection_dataset
 
 
 class FakeCamera:
@@ -56,6 +57,7 @@ class FakeArm:
         self.gate = FakeGate()
         self.commands = []
         self.halts = []
+        self.halted = False
         FakeArm.last = self
 
     def __enter__(self):
@@ -73,10 +75,12 @@ class FakeArm:
     def command_joints(self, target, measured):
         assert self.gate.opened
         self.commands.append(list(target))
+        self.halted = False
 
     def halt(self, reason):
-        if not self.halts:
+        if not self.halted:
             self.halts.append(reason)
+            self.halted = True
         self.gate.close(reason)
 
 
@@ -124,7 +128,6 @@ class FakeRuntime:
     def predict(self, rgb, angles, velocities, previous_action):
         assert rgb.shape == (4, 4, 3)
         assert angles[-1] == -45
-        assert previous_action == [0.0] * 5
         return Prediction((0, 0, 0.2, 0.2, float(self.detected)), (0.1,) * 5, (5.0, 0.0, 0.0, 0.0, 0.0, -45.0))
 
 
@@ -163,7 +166,9 @@ def test_preview_never_sends_and_execute_halts_after_command():
     assert arm.config.read_only
     assert arm.commands == []
     execute_runtime = FakeRuntime()
-    run_camera(args(True), execute_runtime, lambda **kw: SimpleNamespace(**kw), FakeArm, FakeCamera)
+    options = args(True)
+    options.max_frames = 2
+    run_camera(options, execute_runtime, lambda **kw: SimpleNamespace(**kw), FakeArm, FakeCamera)
     assert execute_runtime.warmups == 1
     arm = FakeArm.last
     assert arm is not None
@@ -202,35 +207,60 @@ def test_browser_preview_serves_current_yolo_box():
         preview.close()
 
 
-def test_missing_hand_disarms_but_keeps_camera_running(capsys):
+def test_missing_hand_holds_but_keeps_camera_running(capsys):
     run_camera(args(True), FakeRuntime(False), lambda **kw: SimpleNamespace(**kw), FakeArm, FakeCamera)
     arm = FakeArm.last
     assert arm is not None
     assert arm.commands == []
-    assert arm.halts == ["Human hand not detected; restart --execute after preview detects one"]
+    assert arm.halts == ["Human hand not detected"]
     frame = json.loads(capsys.readouterr().out.splitlines()[-1])
-    assert frame["motion_state"] == "stopped"
+    assert frame["motion_state"] == "waiting_for_hand"
     assert frame["sent_target_deg"] is None
+    assert frame["hold_reason"] == "Human hand not detected"
 
 
-def test_lost_hand_stops_and_never_auto_rearms():
+def test_lost_hand_stops_and_resumes_after_two_detections(capsys):
     class IntermittentRuntime(FakeRuntime):
         def __init__(self, detections):
             super().__init__()
             self.detections = iter(detections)
+            self.previous_actions = []
 
-        def predict(self, *_args):
+        def predict(self, _rgb, _angles, _velocities, previous_action):
+            self.previous_actions.append(list(previous_action))
             detected = next(self.detections)
             return Prediction((0, 0, 0.2, 0.2, float(detected)), (0.1,) * 5, (5, 0, 0, 0, 0, -45))
 
     options = args(True)
-    options.max_frames = 3
-    run_camera(
-        options, IntermittentRuntime([True, False, True]), lambda **kw: SimpleNamespace(**kw), FakeArm, FakeCamera
-    )
+    options.max_frames = 8
+    runtime = IntermittentRuntime([True, True, False, True, False, True, True, False])
+    run_camera(options, runtime, lambda **kw: SimpleNamespace(**kw), FakeArm, FakeCamera)
     arm = FakeArm.last
-    assert arm.commands == [[1.0, 0.0, 0.0, 0.0, 0.0, -45.0]]
-    assert arm.halts == ["Human hand not detected; restart --execute after preview detects one"]
+    assert arm.commands == [[1.0, 0.0, 0.0, 0.0, 0.0, -45.0]] * 2
+    assert arm.halts == ["Human hand not detected"] * 2
+    assert runtime.previous_actions[2] == [0.1] * 5
+    assert runtime.previous_actions[3] == [0.0] * 5
+    frames = [json.loads(line) for line in capsys.readouterr().out.splitlines() if '"frame"' in line]
+    assert [frame["motion_state"] for frame in frames] == [
+        "acquiring_hand",
+        "tracking",
+        "waiting_for_hand",
+        "acquiring_hand",
+        "waiting_for_hand",
+        "acquiring_hand",
+        "tracking",
+        "waiting_for_hand",
+    ]
+    assert [frame["sent_target_deg"] is not None for frame in frames] == [
+        False,
+        True,
+        False,
+        False,
+        False,
+        False,
+        True,
+        False,
+    ]
 
 
 def test_slow_inference_sends_no_command_and_reports_timing(monkeypatch):
@@ -314,6 +344,20 @@ def test_direct_serial_execute_checks_gate_feedback_and_step(tmp_path):
     assert robot.closed
 
 
+def test_direct_serial_stops_again_after_tracking_resumes(tmp_path):
+    robot = FakeRobot()
+    with ArmSession(
+        ArmConfig(read_only=False), robot_factory=lambda _port, _baud: robot, lock_path=str(tmp_path / "arm.lock")
+    ) as arm:
+        for _ in range(2):
+            reading = arm.read_joints()
+            arm.gate.open("detected")
+            arm.command_joints([1, 0, 0, 0, 0, -45], measured=reading)
+            arm.halt("lost")
+            arm.halt("still lost")
+    assert [call[0] for call in robot.calls] == ["set_fresh_mode", "send_angles", "stop", "send_angles", "stop"]
+
+
 def test_camera_loop_with_direct_serial_session(tmp_path):
     robot = FakeRobot()
 
@@ -324,7 +368,9 @@ def test_camera_loop_with_direct_serial_session(tmp_path):
     run_camera(args(False), FakeRuntime(), ArmConfig, DirectSession, FakeCamera)
     assert robot.calls == []
     robot.closed = False
-    run_camera(args(True), FakeRuntime(), ArmConfig, DirectSession, FakeCamera)
+    options = args(True)
+    options.max_frames = 2
+    run_camera(options, FakeRuntime(), ArmConfig, DirectSession, FakeCamera)
     assert robot.calls == [
         ("set_fresh_mode", 1),
         ("send_angles", [1.0, 0.0, 0.0, 0.0, 0.0, -45.0], 10, True),
@@ -390,9 +436,27 @@ def test_rgb_square_crop_and_class_filter():
     )
     result = box_from_results([SimpleNamespace(boxes=boxes)])
     assert result == pytest.approx((0, 0, 0.5, 0.5, 1))
+    assert box_from_results([SimpleNamespace(boxes=boxes)], hand_class=0) == pytest.approx((0, 0, 0, 0, 0))
+
+
+def test_pose_labels_become_one_class_boxes_without_following_source_labels(tmp_path):
+    pose = tmp_path / "pose"
+    output = tmp_path / "detect"
+    for split in ("train", "val"):
+        images = pose / "images" / split
+        labels = pose / "labels" / split
+        images.mkdir(parents=True)
+        labels.mkdir(parents=True)
+        (images / "hand.jpg").write_bytes(b"image bytes")
+        (labels / "hand.txt").write_text("0 0.5 0.5 1.2 0.5 0.1 0.2 2\n")
+    yaml = prepare_detection_dataset(pose, output)
+    assert "0: Human hand" in yaml.read_text()
+    assert (output / "labels/train/hand.txt").read_text() == "0 0.50000000 0.50000000 1.00000000 0.50000000\n"
+    assert (output / "images/train/hand.jpg").samefile(pose / "images/train/hand.jpg")
+    assert not (output / "images/train").is_symlink()
 
 
 def test_deploy_source_parses_as_python_38():
-    for name in ("runtime.py", "controller.py", "arm.py", "preview.py", "run.py"):
+    for name in ("runtime.py", "controller.py", "arm.py", "preview.py", "run.py", "train_hand_detector.py"):
         source = (Path(__file__).resolve().parents[1] / "deploy" / name).read_text()
         ast.parse(source, filename=name, feature_version=(3, 8))

@@ -12,7 +12,8 @@ PAGE = b"""<!doctype html>
 <style>body{background:#111;color:#eee;font:16px sans-serif;margin:24px}
 img{max-width:min(90vw,720px);image-rendering:auto}p{max-width:720px}</style>
 <h1>myCobot hand preview</h1>
-<p>Green: YOLO Human hand box. White: camera center. STOPPED means restart is required before any motion.</p>
+<p>Green: YOLO hand box. White: camera center. WAITING_FOR_HAND pauses the arm.</p>
+<p>Two consecutive hand detections resume tracking.</p>
 <img id="frame" alt="Waiting for camera frame">
 <script>const frame=document.getElementById('frame');
 function refresh(){frame.onload=()=>setTimeout(refresh,200);
@@ -21,7 +22,7 @@ frame.src='/frame.jpg?t='+Date.now()}refresh()</script></html>"""
 
 
 def annotated_frame(rgb, prediction, mode, observation_age_s):
-    """Draw the class-267 box on the exact square crop passed to YOLO."""
+    """Draw the detected hand box on the exact square crop passed to YOLO."""
     frame = cv2.cvtColor(rgb.numpy(), cv2.COLOR_RGB2BGR)
     height, width = frame.shape[:2]
     cv2.drawMarker(frame, (width // 2, height // 2), (255, 255, 255), cv2.MARKER_CROSS, 16, 2)

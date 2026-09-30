@@ -21,6 +21,7 @@ YOLO_NAME = "yolov8n-oiv7.pt"
 HAND_CLASS = 267
 IMAGE_SIZE = 320
 MIN_CONFIDENCE = 0.05
+FINETUNED_MIN_CONFIDENCE = 0.25
 HOME_DEG = (0.0, 0.0, 0.0, 0.0, 0.0, -45.0)
 ACTION_SCALE_RAD = 0.25
 
@@ -68,12 +69,12 @@ def build_actor(checkpoint_path, device="cpu"):
     return actor.to(device).eval()
 
 
-def box_from_results(results):
+def box_from_results(results, hand_class=HAND_CLASS, min_confidence=MIN_CONFIDENCE):
     """Same normalized (cx, cy, w, h, detected) contract as training."""
     boxes = results[0].boxes
     if boxes is None or len(boxes.xyxy) == 0:
         return (0.0, 0.0, 0.0, 0.0, 0.0)
-    matching = (boxes.cls.int() == HAND_CLASS) & (boxes.conf >= MIN_CONFIDENCE)
+    matching = (boxes.cls.int() == hand_class) & (boxes.conf >= min_confidence)
     if not bool(matching.any()):
         return (0.0, 0.0, 0.0, 0.0, 0.0)
     best = torch.argmax(torch.where(matching, boxes.conf, torch.tensor(float("-inf"), device=boxes.conf.device)))
@@ -104,8 +105,11 @@ class HandPolicyRuntime:
         self.device = str(device)
         self.actor = build_actor(checkpoint_path, self.device)
         self.detector = YOLO(yolo_weights or default_yolo_weights())
-        if self.detector.names.get(HAND_CLASS) != "Human hand":
-            raise ValueError("YOLO weights lack Open Images class 267 (Human hand)")
+        hand_classes = [key for key, name in self.detector.names.items() if name.lower() == "human hand"]
+        if len(hand_classes) != 1:
+            raise ValueError("YOLO weights must have exactly one Human hand class")
+        self.hand_class = hand_classes[0]
+        self.min_confidence = FINETUNED_MIN_CONFIDENCE if self.hand_class == 0 else MIN_CONFIDENCE
 
     def warmup(self):
         """Pay the first YOLO/CUDA inference cost before opening the robot."""
@@ -127,14 +131,14 @@ class HandPolicyRuntime:
         frame = F.interpolate(frame, size=(IMAGE_SIZE, IMAGE_SIZE), mode="bilinear", align_corners=False)
         detections = self.detector.predict(
             source=frame,
-            classes=[HAND_CLASS],
-            conf=MIN_CONFIDENCE,
+            classes=[self.hand_class],
+            conf=self.min_confidence,
             imgsz=IMAGE_SIZE,
             max_det=1,
             device=self.device,
             verbose=False,
         )
-        box = box_from_results(detections)
+        box = box_from_results(detections, hand_class=self.hand_class, min_confidence=self.min_confidence)
         angles_rel = [math.radians(float(q) - home) for q, home in zip(angles_deg, HOME_DEG)]
         velocities = [math.radians(float(v)) for v in velocities_deg_s]
         obs = torch.tensor(
