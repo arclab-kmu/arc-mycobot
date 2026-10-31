@@ -25,7 +25,7 @@ def test_projection_matches_opencv():
     rotation = matrix_from_quaternion_wxyz(calibration.quaternion_wxyz).T
     translation = -rotation @ np.asarray(calibration.position_m)
     matrix = np.asarray(calibration.intrinsic_matrix).reshape(3, 3)
-    expected, _ = cv2.projectPoints(points, cv2.Rodrigues(rotation)[0], translation, matrix, None)
+    expected, _ = cv2.projectPoints(points, cv2.Rodrigues(rotation)[0], translation, matrix, np.zeros(5))
     pixels, depth = projector.pixels(torch.tensor(points, dtype=torch.float32))
     assert (depth > 0).all()
     assert pixels.numpy() == pytest.approx(expected[:, 0], abs=1e-2)
