@@ -23,8 +23,9 @@ class MyCobotReachPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
     # v1's 1500-iteration run (PhysX, 4096 envs, seed 0) peaked at iteration 400 (2.9 mm mean error, 93.0% of steps on
     # target) and then drifted to 4.9 mm and 88.6% as the action noise std collapsed from 1.0 to 0.04. 500 is past that
-    # peak; the last checkpoint is not necessarily the best one. The v2 Newton run (seed 0) had not degraded by 499
-    # (2.74 mm at 400, lowest 2.02 mm at 475, 2.24 mm at 499), so the budget is v1's and not yet re-measured here.
+    # peak; the last checkpoint is not necessarily the best one. The v2 Newton run with self-collision and the
+    # self-contact penalty (seed 0) had not degraded by 499 (3.45 mm at 400, lowest 2.38 mm at 493, 2.61 mm and 96.1%
+    # at 499), so the budget is v1's and not yet re-measured here.
     max_iterations = 500
     save_interval = 50
     experiment_name = "reach_mycobot_280_jn"

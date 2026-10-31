@@ -4,11 +4,10 @@
 
 """myCobot 280 JetsonNano wiring for the position-reach task.
 
-The numbers come from v1 (tag ``v1.0.0``), where they were derived from the arm's forward kinematics and checked with a
-CPU-only bounded-IK sweep (``workspace_sweep``): every corner of the goal box and 600 uniform samples solved to under
-0.003 mm within the joint limits. Rerun that check (v1's ``scripts/tools/workspace_sweep.py``) after changing the goal
-box. Lengths (``TANH_STD``, ``SUCCESS_THRESHOLD``) are scaled to this arm's 0.28 m reach, not inherited from upstream's
-Franka and UR10 configs.
+The numbers come from v1 (tag ``v1.0.0``), where they were derived from the arm's forward kinematics, except the goal
+box's near face: ``scripts/reach_workspace_sweep.py`` moves it out of the region the arm reaches only through itself.
+Rerun that sweep after changing the goal box, the URDF, or the collision meshes. Lengths (``TANH_STD``,
+``SUCCESS_THRESHOLD``) are scaled to this arm's 0.28 m reach, not inherited from upstream's Franka and UR10 configs.
 """
 
 import copy
@@ -25,15 +24,20 @@ from ...reach_env_cfg import ReachEnvCfg
 # Task constants
 ##
 
-TARGET_POS_CENTRE = (0.16, 0.0, 0.20)
+TARGET_POS_CENTRE = (0.165, 0.0, 0.20)
 """Goal-box centre in the robot root (``joint1``) frame [m].
 
-About 53% of the flange's 302 mm horizontal reach, inside the dexterous region rather than at full extension. 160 mm and
-not 180 mm: at 180 the far-top-side corner is 9.3 mm out of reach, which uniform sampling almost never visits.
+v1's box was (0.16, 0, 0.20) +- (0.08, 0.12, 0.08): about 53% of the flange's 302 mm horizontal reach, inside the
+dexterous region rather than at full extension, and 160 mm rather than 180 mm out because at 180 the far-top-side corner
+is 9.3 mm out of reach. ``reach_workspace_sweep.py`` (1 cm grid, 256 IK starts per goal, 5 mm hull clearance) found
+99.9% of that box reachable without self-collision; the 4 goals that are not sit at x = 0.08 m right above the base.
+The near face therefore moves from x = 0.08 to 0.09 m, the largest box whose grid goals are all reachable (94% of v1's
+volume).
 """
 
-TARGET_POS_RANGE = (0.08, 0.12, 0.08)
-"""Half-extent of the goal box [m]: 160 x 240 x 160 mm. Its lower face is 120 mm above the mounting plane."""
+TARGET_POS_RANGE = (0.075, 0.12, 0.08)
+"""Half-extent of the goal box [m]: x 0.09-0.24, y -0.12-0.12, z 0.12-0.28; the lower face is 120 mm above the mounting
+plane."""
 
 TARGET_ORIENTATION = (math.pi, 0.0, 0.0)
 """Goal ``(roll, pitch, yaw)`` [rad], pinned: orientation is neither observed nor rewarded; flange down reads well."""

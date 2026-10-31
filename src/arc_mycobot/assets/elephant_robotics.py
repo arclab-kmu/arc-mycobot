@@ -117,9 +117,15 @@ MYCOBOT_280_JN_CFG = ArticulationCfg(
         # The URDF carries convex-hull collision STLs; do not rebuild collision from the decorative visuals.
         collision_from_visuals=False,
         collision_type="Convex Hull",
-        self_collision=False,
+        # Self-collision on (v1 had it off): without it a reach policy folded the gripper into the base and lower arm
+        # for 24% of goals, up to 41 mm deep. Links welded by fixed joints, and links one joint apart, are not checked;
+        # no checked pair touches at home. The same flag is set for PhysX and Newton in `articulation_props`. Contacts
+        # are soft, so a task still has to penalize self-contact (see reach's `self_contact` reward term).
+        self_collision=True,
         # Every link has an inertial block; four reference frames carry 0.1 g each.
         link_density=0.0,
+        # PhysX needs this for contact sensors (the reach self-contact penalty); Newton ignores it.
+        activate_contact_sensors=True,
         joint_drive=sim_utils.UrdfConverterCfg.JointDriveCfg(
             target_type="position",
             # Gains come from the actuator below, not the URDF.
@@ -132,9 +138,9 @@ MYCOBOT_280_JN_CFG = ArticulationCfg(
         ),
         articulation_props=[
             PhysxArticulationCfg(
-                enabled_self_collisions=False, solver_position_iteration_count=8, solver_velocity_iteration_count=0
+                enabled_self_collisions=True, solver_position_iteration_count=8, solver_velocity_iteration_count=0
             ),
-            NewtonArticulationCfg(self_collision_enabled=False),
+            NewtonArticulationCfg(self_collision_enabled=True),
         ],
     ),
     init_state=ArticulationCfg.InitialStateCfg(joint_pos=MYCOBOT_HOME_POSE, joint_vel={".*": 0.0}),

@@ -2,8 +2,8 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Derived from isaaclab_tasks/core/reach/reach_env_cfg.py in Isaac Lab 3.0.0 (BSD-3-Clause). The divergences are v1's
-# and are listed in the ReachEnvCfg docstring.
+# Derived from isaaclab_tasks/core/reach/reach_env_cfg.py in Isaac Lab 3.0.0 (BSD-3-Clause). The divergences are
+# listed in the ReachEnvCfg docstring.
 
 """Robot-agnostic base for end-effector **position** reach.
 
@@ -26,6 +26,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.physics import PhysxAutoCfg
 from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sensors import ContactSensorCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 from isaaclab.visualizers import VisualizerCfg
@@ -75,9 +76,9 @@ class ReachPhysicsCfg(PresetCfg):
 class ReachSceneCfg(InteractiveSceneCfg):
     """Configuration for the scene with a robotic arm."""
 
-    # 1.05 m below the mounting plane and cosmetic, as upstream. Self-collision is off and the arm collides through
-    # convex hulls, so a floor at the mounting plane would be a surface to exploit or get stuck on. The goal box sits
-    # entirely above the mounting plane instead (TARGET_POS_CENTRE in the robot config).
+    # 1.05 m below the mounting plane and cosmetic, as upstream. The arm collides through convex hulls, so a floor at
+    # the mounting plane would be a surface to exploit or get stuck on. The goal box sits entirely above the mounting
+    # plane instead (TARGET_POS_CENTRE in the robot config).
     ground = AssetBaseCfg(
         prim_path="/World/ground",
         spawn=sim_utils.GroundPlaneCfg(),
@@ -86,6 +87,9 @@ class ReachSceneCfg(InteractiveSceneCfg):
 
     # robots
     robot: ArticulationCfg = MISSING
+
+    # Every robot body, for the self-contact penalty; nothing else in the scene is within the arm's reach.
+    self_contacts = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=2)
 
     # lights
     light = AssetBaseCfg(
@@ -220,6 +224,14 @@ class RewardsCfg:
         },
     )
 
+    # -- self-contact. Contacts are soft enough that a policy pushing at the torque limit sinks one link 20+ mm into
+    # another, so self-collision alone does not stop it. Each touching body costs more than the task terms can pay.
+    self_contact = RewTerm(
+        func=mdp.undesired_contacts,
+        weight=-0.1,
+        params={"sensor_cfg": SceneEntityCfg("self_contacts", body_names=".*"), "threshold": 0.1},
+    )
+
     # -- action penalty: start near zero and rise with the curriculum, so the policy does not learn to stand still.
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.0001)
     joint_vel = RewTerm(
@@ -264,7 +276,9 @@ class ReachEnvCfg(ManagerBasedRLEnvCfg):
     * ``reset_joints_by_offset`` instead of ``reset_joints_by_scale``;
     * joint terms name their joints explicitly;
     * no table asset: upstream's is sized for a Franka and would sit through a 280 mm arm's workspace;
-    * decimation 2 at 120 Hz physics, a 60 Hz policy instead of upstream's 30 Hz.
+    * decimation 2 at 120 Hz physics, a 60 Hz policy instead of upstream's 30 Hz;
+    * new in v2: a contact sensor on every robot body and a ``self_contact`` penalty, for robots spawned with
+      self-collision on.
     """
 
     # Scene settings

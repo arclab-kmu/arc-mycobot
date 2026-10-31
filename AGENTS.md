@@ -30,6 +30,8 @@ src/arc_mycobot/
         └── config/mycobot/     # ARC-Reach-MyCobot280JN; joint_pos_env_cfg.py, agents/rsl_rl_ppo_cfg.py
 ```
 
+- `scripts/` holds the template's `list_envs.py` and the reach geometry tools: `mycobot_collision.py` (URDF forward
+  kinematics and hull overlap, no Isaac Lab import), `reach_workspace_sweep.py`, and `reach_self_collision_check.py`.
 - Tasks are discovered through `[project.entry-points."isaaclab.tasks"]` → `arc_mycobot.tasks`.
 - A task family is `tasks/<task>/{<task>_env_cfg.py, mdp/, config/<robot>/{__init__.py, *_env_cfg.py, agents/}}`.
   Terms shared by several task families go in `tasks/mdp/` (skipped by the task importer).
@@ -64,6 +66,8 @@ uv run pyright
 uv run isaaclab list_envs --keyword ARC
 uv run isaaclab zero_agent --task ARC-Reach-MyCobot280JN --num_envs 16 --max_steps 200 --viz none   # GPU
 uv run isaaclab train --rl_library rsl_rl --task ARC-Reach-MyCobot280JN --seed 0                    # GPU
+uv run python scripts/reach_workspace_sweep.py                  # GPU, no simulator: goal box reachable without self-collision
+uv run python scripts/reach_self_collision_check.py --checkpoint <model.pt>   # GPU: link overlap of a trained policy
 uv build
 ```
 
@@ -85,6 +89,7 @@ uv build
    --num_envs 16 --max_steps 200` with observation/action sizes equal to v1 and joint names, order, and limits equal to
    the URDF; `isaaclab train --rl_library rsl_rl --num_envs 512 --max_iterations 3` smoke; then a full run compared with
    v1's numbers (reach v1: 2.9 mm, 93.0% on-target at iteration 400). A short smoke run does not show a task learns.
+   Then run `scripts/reach_self_collision_check.py` (or the task's equivalent) on the final checkpoint.
 3. `deploy/` (Jetson, Python 3.8) must stay 3.8-parseable: exclude it from the py312 ruff target or give it its own.
    rsl_rl 5.5.1 checkpoints store `actor_state_dict`/`critic_state_dict`, not v1's `model_state_dict` with `actor.`
    keys; `isaaclab play` exports `exported/policy.pt` and `policy.onnx`. Redefine the deploy contract before reuse.
@@ -105,3 +110,18 @@ uv build
   plugin must be registered before the first USD stage (`assets/elephant_robotics.py` does this at import).
 - `UrdfFileCfg(merge_fixed_joints=False)` keeps all 19 myCobot bodies (`joint6_flange`, `camera_link`, `tcp`, finger
   links). Importer 3.0 ignores `root_link_name` (warning only); the URDF's only root is `joint1`.
+
+## Self-collision
+
+- The arm has self-collision on (v1 had it off, and a v1-style reach policy folded the gripper into the base and lower
+  arm for 24% of goals). Newton filters joint-connected parent/child bodies; MuJoCo Warp also skips bodies welded by
+  fixed joints and weld groups one joint apart. `scripts/mycobot_collision.py` reproduces that pair set (55 pairs) and the
+  URDF forward kinematics (matches the simulator's body poses to about 1 µm).
+- MuJoCo contacts are soft: a policy that keeps pushing can sink a hull 20+ mm into another link with contacts active.
+  Self-collision on is not proof of no overlap; measure a trained policy with `scripts/reach_self_collision_check.py`.
+  Reach therefore carries a contact sensor on every robot body and a `self_contact` penalty (`undesired_contacts`,
+  -0.1 per touching body). Seed 0, 1024 envs x 12 s, overlap > 2 mm at the end of the 4096 goal windows: 24.5% for a
+  policy trained with self-collision off, 7.7% retrained with it on, 0.0% with the penalty added (4.7% of episodes
+  still overlap briefly in transit, up to about 10 mm).
+- Goal regions the arm reaches only through itself must not be in the goal box; `scripts/reach_workspace_sweep.py`
+  derives the box. Rerun both after changing the URDF, collision meshes, joint limits, or the goal box.
