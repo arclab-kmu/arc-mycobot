@@ -3,6 +3,9 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+# Vendor meshes (Elephant Robotics, BSD-2-Clause) are kept byte-for-byte; joint1_jet.stl is 3.8 MB.
+exclude: ^src/arc_mycobot/assets/data/mycobot_280_jn/meshes/
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.10

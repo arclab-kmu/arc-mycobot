@@ -6,8 +6,8 @@ Guidance for coding agents in this repository. `CLAUDE.md` is a symlink to this 
 
 `arc-mycobot` v2: an Isaac Lab **3.0.0** external project (import package `arc_mycobot`) for the myCobot 280
 JetsonNano. The layout is exactly the Isaac Lab 3.0.0 template generator's external project (`isaaclab --new`,
-blank content, wheel mode). v2 is being rebuilt task by task: reach, then cube lift, then wrist-camera visual alignment
-(YOLO hand), then the Jetson `deploy/` runtime. Until a task lands here, it exists only in v1.
+blank content, wheel mode). v2 is being rebuilt task by task: reach (ported), then cube lift, then wrist-camera visual
+alignment (YOLO hand), then the Jetson `deploy/` runtime. Until a task lands here, it exists only in v1.
 
 The Isaac Lab 2.3.2 implementation (v1) is frozen at tag `v1.0.0` on `main`; its checkout and runtime data (`logs/`,
 `outputs/`, `dist/`) live in the sibling folder `../arc-mycobot-v1`, a linked worktree of this repository's `.git`.
@@ -19,9 +19,15 @@ changed quaternion order, data accessors, writers, camera configs, rsl_rl config
 ```text
 src/arc_mycobot/
 ├── __init__.py                 # passive: never import tasks or isaaclab here
-├── assets/                     # ARC_MYCOBOT_ASSETS_DIR -> assets/data (URDF, meshes, USD)
+├── assets/                     # ARC_MYCOBOT_ASSETS_DIR -> assets/data
+│   ├── elephant_robotics.py    # MYCOBOT_280_JN_CFG, joint/body names, home pose, URDF paths
+│   └── data/mycobot_280_jn/    # v1's repaired URDFs (fixed and parallel jaw) + vendor meshes (BSD-2-Clause)
 └── tasks/
-    └── __init__.py             # import_packages(): imports every task package, skips `utils` and `.mdp`
+    ├── __init__.py             # import_packages(): imports every task package, skips `utils` and `.mdp`
+    └── reach/
+        ├── reach_env_cfg.py    # robot-agnostic base derived from upstream core/reach + v1's divergences
+        ├── mdp/                # lazy_export() + __init__.pyi: position_command, position_command_success
+        └── config/mycobot/     # ARC-Reach-MyCobot280JN; joint_pos_env_cfg.py, agents/rsl_rl_ppo_cfg.py
 ```
 
 - Tasks are discovered through `[project.entry-points."isaaclab.tasks"]` → `arc_mycobot.tasks`.
@@ -56,10 +62,19 @@ uv run ruff check --fix . && uv run ruff format .
 uv run pre-commit run --all-files               # ruff, hygiene hooks, codespell
 uv run pyright
 uv run isaaclab list_envs --keyword ARC
+uv run isaaclab zero_agent --task ARC-Reach-MyCobot280JN --num_envs 16 --max_steps 200 --viz none   # GPU
+uv run isaaclab train --rl_library rsl_rl --task ARC-Reach-MyCobot280JN --seed 0                    # GPU
 uv build
 ```
 
+- `zero_agent` and `random_agent` default to `--viz newton_gl`; without a reachable X display they fail in pyglet
+  (`NoSuchDisplayException`), so pass `--viz none` for headless checks.
+- The pre-commit config excludes the vendor meshes (kept byte-for-byte; `joint1_jet.stl` is 3.8 MB).
+
 - Ruff ignores B008 because Isaac Lab MDP terms use `asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")` defaults.
+- `uv run pyright` is not a gate: it reports 19 errors, all in `tasks/reach/reach_env_cfg.py` from the upstream
+  configclass idioms (`MISSING` defaults, `PresetCfg` assigned to `sim.physics`, curriculum term classes). Upstream
+  `core/reach` reports the same kinds. Do not add new kinds in project-owned code.
 - Commit messages use Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`; `!` for breaking changes).
 
 ## Porting a v1 task
@@ -87,5 +102,6 @@ uv build
   `update_latest_camera_pose=True`. There is no `--enable_cameras` or `--headless`; windows open only with `--viz`.
 - The kit-less URDF importer nests bodies under `Robot/Geometry/<root>/...` and merges fixed-joint links into their
   parent, so sensor and FrameTransformer prim paths written as `Robot/<link>` may break. Its fallback PhysX schema
-  plugin must be registered before the first USD stage (import `isaacsim.asset.importer.utils.impl.physx_types` at the
-  top of the robot cfg module).
+  plugin must be registered before the first USD stage (`assets/elephant_robotics.py` does this at import).
+- `UrdfFileCfg(merge_fixed_joints=False)` keeps all 19 myCobot bodies (`joint6_flange`, `camera_link`, `tcp`, finger
+  links). Importer 3.0 ignores `root_link_name` (warning only); the URDF's only root is `joint1`.
