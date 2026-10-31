@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from arc_mycobot.assets.robots.camera_gripper_assets import CAMERA_GRIPPER_PARALLEL_URDF, CAMERA_GRIPPER_URDF
-from arc_mycobot.assets.robots.mycobot_urdf import ARM_JOINTS, LIFT_HOME_POSE, PARALLEL_FINGER_JOINTS
+from arc_mycobot.assets.robots.mycobot_urdf import ARM_JOINTS, LIFT_HOME_POSE, LIFT_START_POSE, PARALLEL_FINGER_JOINTS
 from arc_mycobot.kinematics.urdf_fk import load_chain
 from arc_mycobot.tasks.lift.config.mycobot.geometry import JAW_OFFSET_IN_GRIPPER_BASE, SPAWN_POS_CENTRE
 
@@ -69,9 +69,22 @@ def test_reach_and_lift_have_distinct_jaws():
         PARALLEL_FINGER_JOINTS
     )
     colliders = [link.attrib["name"] for link in lift.findall("link") if link.find("collision") is not None]
-    assert colliders == ["gripper_left3", "gripper_right3"]
-    for pad in colliders:
+    assert colliders == ["joint6", "joint6_flange", "gripper_base", "gripper_left3", "gripper_right3", "camera_flange"]
+    for pad in ("gripper_left3", "gripper_right3"):
         assert lift.find(f"link[@name='{pad}']/collision/geometry/box") is not None
+
+
+def test_lift_hull_colliders_follow_their_visual_meshes():
+    """Same frame as the visual mesh, so the hull sits where the part is drawn."""
+    lift = ET.parse(CAMERA_GRIPPER_PARALLEL_URDF).getroot()
+    for name in ("joint6", "joint6_flange", "gripper_base", "camera_flange"):
+        link = lift.find(f"link[@name='{name}']")
+        visual, collision = link.find("visual"), link.find("collision")
+        assert collision.find("origin").attrib == visual.find("origin").attrib
+        visual_mesh = visual.find("geometry/mesh").attrib["filename"]
+        hull_mesh = collision.find("geometry/mesh").attrib["filename"]
+        assert hull_mesh == visual_mesh.replace(".stl", "_hull.stl")
+        assert (CAMERA_GRIPPER_PARALLEL_URDF.parent / hull_mesh).is_file()
 
 
 def test_cpu_fk_reads_the_reach_asset():
@@ -87,5 +100,14 @@ def test_lift_home_jaw_faces_the_cube():
     jaw = pos + rot @ np.array(JAW_OFFSET_IN_GRIPPER_BASE)
     closing_axis = rot[:, 0]
     assert jaw[:2] == pytest.approx(SPAWN_POS_CENTRE[:2], abs=0.001)
-    assert closing_axis[1] < -0.95
+    assert abs(closing_axis[1]) > 0.95  # the parallel jaw is symmetric along its closing line
     assert abs(closing_axis[2]) < 0.06
+    camera, _ = load_chain("camera_link", CAMERA_GRIPPER_PARALLEL_URDF).fk(angles)
+    assert camera[2] > jaw[2] + 0.03, "the camera must sit above the jaw, not between it and the table"
+
+
+def test_lift_starts_from_the_physical_straight_pose():
+    angles = np.array([LIFT_START_POSE[name] for name in ARM_JOINTS])
+    assert angles == pytest.approx([0.0, 0.0, 0.0, 0.0, 0.0, -math.pi / 4])
+    home_j6 = LIFT_HOME_POSE["joint6output_to_joint6"]
+    assert abs(home_j6 - angles[5]) < math.radians(3)

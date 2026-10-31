@@ -44,3 +44,11 @@ class MyCobotCubeLiftPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
     )
+
+
+@configclass
+class MyCobotCubeLiftExtCamPPORunnerCfg(MyCobotCubeLiftPPORunnerCfg):
+    """Same PPO; the critic additionally reads the privileged ``critic`` group."""
+
+    experiment_name = "lift_extcam_mycobot_280_jn"
+    obs_groups = {"policy": ["policy"], "critic": ["policy", "critic"]}

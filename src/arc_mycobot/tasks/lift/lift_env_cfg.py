@@ -21,6 +21,7 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sensors import TiledCameraCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg
 from isaaclab.utils import configclass
 
@@ -39,6 +40,9 @@ class LiftSceneCfg(InteractiveSceneCfg):
     # The point between the grip pads. Set by the robot config.
     ee_frame: FrameTransformerCfg = MISSING
     object: RigidObjectCfg = MISSING
+    # Optional fixed third-person camera for viewing; observations project the
+    # cube through its calibration instead of rendering it.
+    external_camera: TiledCameraCfg | None = None
 
     # The ground is the **work surface** here, at the robot's own mounting plane
     # -- unlike the reach task, where it is cosmetic and sits 1.05 m below. The
@@ -182,6 +186,9 @@ class RewardsCfg:
         params={"std": MISSING, "minimal_height": MISSING, "command_name": "object_pose"},
         weight=5.0,
     )
+
+    # Robot-specific: the config names the hulled links and their URDF.
+    floor_clearance: RewTerm | None = None
 
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-4)
     joint_vel = RewTerm(

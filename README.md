@@ -261,14 +261,23 @@ joint 위치 오프셋 6개와 이진 열기/닫기 1개를 낸다.
   gripper 몸체가 닿는 거리 바깥이다.
 * **측면 파지.** pad는 조 축을 기준으로 z ∈ [−11, +11] mm에 대칭으로 놓인다.
   접근은 수평이고 pad는 수직 평면에 선다.
-* **로봇 전체 collider 2개.** 이 pad 둘이 전부다. `collision_from_visuals`를 끈
-  결과인데, 켜 두면 팔이 장식용 visual mesh에서 뜬 convex hull을 달고 다니고,
-  파지에 필요한 낮은 자세에서 그것들이 바닥을 누른다. 가만히 서 있기만 해도
-  joint 오차가 **0.19 rad**(조 기준 약 30 mm, 큐브보다 크다) 쌓였다. 끄면
-  **0.005 rad**로 떨어진다.
+* **팔 전체가 아니라 손끝 쪽에만 collider.** `collision_from_visuals`는 끈다.
+  켜 두면 팔이 장식용 visual mesh에서 뜬 convex hull을 달고 다니고, 파지에 필요한
+  낮은 자세에서 그것들이 바닥을 누른다. 가만히 서 있기만 해도 joint 오차가
+  **0.19 rad**(조 기준 약 30 mm, 큐브보다 크다) 쌓였다. 끄면 **0.005 rad**로
+  떨어진다. 대신 두 pad 외에 손목(`joint6`, `joint6_flange`), `gripper_base`,
+  `camera_flange`에만 packaged `*_hull.stl` collider를 둔다. visual mesh와 같은
+  원점에 붙인다. 손가락 link에는 붙이지 않는다. 그 convex hull이 pad 사이 큐브
+  자리까지 들어오기 때문이다.
+* **table clearance 벌점.** `LinkFloorClearance`가 위 hull과 손가락 visual hull의
+  가장 낮은 점을 매 step 계산한다. 손목·gripper 몸체·카메라 플랜지는 table에서
+  5 mm 안으로, 손가락은 table 아래로 들어가면 벌점(weight −20, table에 닿은
+  link 하나가 초당 −20)을 준다.
 
-마지막 항목의 대가는 분명히 적어 둘 만하다: **팔의 link들이 지면과 서로를 통과할
-수 있다.** task가 이를 보상하지도, 금지하지도 않는다.
+2026-10-06 이전 lift 정책은 손끝 collider와 이 벌점 없이 학습했다. 그 정책은
+96개 에피소드 **전부**에서 큐브를 집는 순간(시작 후 약 0.16초) 카메라 플랜지를
+table 아래 최대 21 mm까지 넣었다. 실물이라면 카메라가 table을 긁는 동작이다.
+팔의 다른 link끼리는 여전히 서로 통과할 수 있다(self-collision off).
 
 ### 여기까지 온 과정
 
@@ -469,6 +478,39 @@ not been validated as safe commands for the physical robot. The reusable
 `HandAlignPolicy.predict` API accepts one uint8 HWC RGB frame and the same
 joint state in radians.
 
+### External camera view
+
+`Isaac-Visual-Align-YOLO-Hand-DR-MyCobot280JN-View-v0`는 DR Play 환경 하나에
+로봇 옆에 고정된 실물 USB 카메라(Jetson `/dev/video0`)와 같은 자세·렌즈의
+`TiledCamera`를 `ExternalCamera`로 추가한다. 보기·녹화용이며 정책 관측에는
+들어가지 않는다. 카메라 값은 `src/arc_mycobot/assets/cameras/external_camera0.json`에서
+읽는다. 위치·자세는 로봇 base frame(J1 축 아래 테이블 위 원점, +x 전방, +y 왼쪽,
++z 위)에서 OpenCV 광학 좌표계(x 오른쪽, y 아래, z 전방)로 적는다. Isaac Lab의
+`"ros"` 카메라 규약과 같다. `ARC_MYCOBOT_EXTERNAL_CAMERA`나 `--calibration`으로 다른
+JSON을 줄 수 있다.
+
+현재 JSON은 **보정 전 추정값**(`"calibrated": false`)이다. 2026-10-06 브라우저
+스크린샷 한 장에서 팔 자세와 무관한 베이스 상자 모서리 5개와, J1–J5 = 0°, J6 = -45°로
+가정한 팔 특징점 4개를 눈으로 읽어 가중 맞춤했다. 640×480, 수평 화각 약 60.5°,
+카메라 위치 `(0.112, -0.646, 0.233)` m(베이스에서 본 방위각 -80°)로 나왔다. 그래서
+베이스의 오른쪽 옆면과 정면(+x)이 함께 보인다. 재투영 오차는 베이스 모서리 2–16 px,
+팔 특징점 5–38 px다. 스크린샷 속 팔이 정확히 홈 자세였는지는 모른다. 실제 값은
+[`deploy/README.md`](deploy/README.md)의 체커보드 보정으로 만든다. 실물 카메라가
+90° 돌아가 장착되어 원본 영상도 옆으로 누워 있다. `--rotate 270`은 출력만 바로 세운다.
+
+```bash
+# 자세를 고정한 한 장(J1..J6, 도). --overlay는 같은 카메라·해상도의 실물 사진을 왜곡 보정 후 겹친다.
+uv run --extra yolo external_view --image external_view.png --rotate 270 \
+  --joint_angles_deg 0 0 0 0 0 -45 --overlay /path/to/real_frame.png
+# 정책 실행 영상(30 step = 1초)
+uv run --extra yolo external_view --checkpoint outputs/arc-mycobot-yolo-hand-policy.pt \
+  --steps 150 --video external_view.mp4 --rotate 270
+```
+
+`--overlay`를 주면 `--image` 옆에 시뮬레이션만 렌더링한 `<이름>_sim.png`도 저장한다.
+시뮬레이터에는 테이블과 주변 물체가 없다. GUI의 `play --task ...-View-v0 --enable_cameras`는
+viewport를 같은 위치에서 시작하지만, viewport는 roll과 렌즈 값을 따르지 않는다.
+
 ## Jetson Nano sim-to-real hand policy
 
 JetPack 4.6 / Python 3.8용 독립 실행 코드는 [`deploy/README.md`](deploy/README.md)에 있다.
@@ -480,6 +522,7 @@ Hugging Face의 checkpoint를 검증해 내려받고 USB 카메라·YOLO·관절
 
 ```
 src/arc_mycobot/
+├── assets/cameras/external_camera0.json # 고정 외부 카메라 렌즈·자세
 ├── assets/robots/
 │   ├── camera_gripper_assets.py  # 실행 URDF의 CPU-safe 경로
 │   ├── urdf/                     # 고정 그리퍼 / 평행 조 버전
@@ -488,6 +531,7 @@ src/arc_mycobot/
 │   └── mycobot_280.py            # 두 패키지 URDF의 spawn, actuator, gain
 ├── kinematics/urdf_fk.py      # 패키지 URDF 기반 numpy FK; Isaac import 없음
 ├── vision/{boxes,yolo_boxes}.py # RGB 표식 및 YOLO box의 공통 관측 형식
+├── vision/camera_calibration.py # 외부 카메라 JSON 로더; Isaac import 없음
 ├── tasks/reach/
 │   ├── reach_env_cfg.py       # 로봇 무관 베이스 (scene, MDP, 60 Hz)
 │   ├── mdp/                   # 프레임워크 항 + 성공 지표 + 목표 관측
@@ -511,7 +555,7 @@ src/arc_mycobot/
 └── scripts/
     ├── rsl_rl/{train,play}.py
     ├── environments/{zero_agent,random_agent,list_envs}.py
-    └── tools/{workspace_sweep,visual_align_eval}.py
+    └── tools/{workspace_sweep,visual_align_eval,external_view}.py
 ```
 
 구조를 지탱하는 경계가 둘 있다:

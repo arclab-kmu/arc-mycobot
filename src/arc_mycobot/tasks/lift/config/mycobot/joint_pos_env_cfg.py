@@ -16,18 +16,24 @@ the jaw and kept the task at 0% for four training runs.
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import RigidObjectCfg
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import ObservationGroupCfg as ObsGroup
+from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import SceneEntityCfg
 from isaaclab.markers.config import FRAME_MARKER_CFG
 from isaaclab.sensors import FrameTransformerCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg
 from isaaclab.utils import configclass
 
 import arc_mycobot.tasks.lift.mdp as mdp
+from arc_mycobot.assets.robots.camera_gripper_assets import CAMERA_GRIPPER_PARALLEL_URDF
 from arc_mycobot.assets.robots.mycobot_280 import (
     MYCOBOT_280_JN_LIFT_CFG,
     MYCOBOT_ARM_JOINTS,
     MYCOBOT_GRIPPER_COMMAND_JOINTS,
 )
-from arc_mycobot.assets.robots.mycobot_urdf import PARALLEL_CLOSED, PARALLEL_OPEN
+from arc_mycobot.assets.robots.mycobot_urdf import LIFT_HOME_POSE, LIFT_START_POSE, PARALLEL_CLOSED, PARALLEL_OPEN
 from arc_mycobot.tasks.lift.config.mycobot.geometry import (
     CUBE_MASS,
     CUBE_SIZE,
@@ -40,7 +46,12 @@ from arc_mycobot.tasks.lift.config.mycobot.geometry import (
 )
 from arc_mycobot.tasks.lift.lift_env_cfg import LiftEnvCfg
 
-__all__ = ["MyCobotCubeLiftEnvCfg", "MyCobotCubeLiftEnvCfg_PLAY"]
+__all__ = [
+    "MyCobotCubeLiftEnvCfg",
+    "MyCobotCubeLiftEnvCfg_PLAY",
+    "MyCobotCubeLiftExtCamEnvCfg",
+    "MyCobotCubeLiftExtCamEnvCfg_PLAY",
+]
 
 JOINT_ACTION_SCALE = 0.5
 """Same 0.5 the reach task arrived at, and for the same reason.
@@ -48,6 +59,13 @@ JOINT_ACTION_SCALE = 0.5
 Joint excursion does not shrink with arm size -- see the reach task's
 ``JOINT_ACTION_SCALE`` docstring for the measurement that established this and
 for what going too small looks like in a training curve.
+"""
+
+START_JOINT_NOISE = 0.05
+"""Uniform reset offset [rad] on each arm joint around :data:`LIFT_START_POSE`.
+
+The physical arm is placed straight up by hand or by one ``send_angles`` call,
+so it starts a few degrees from the exact pose; deployment accepts +-10 deg.
 """
 
 REACH_STD = 0.05
@@ -76,6 +94,26 @@ GRIPPER_CLOSED_BELOW = 0.0065
 The left finger slides 0 (open) to 0.0131 (closed), so the midpoint splits them.
 Note the sense flips with the parallel jaw: larger travel means more closed."""
 
+FLOOR_CLEARANCE_MARGINS = {
+    "joint6": 0.005,
+    "joint6_flange": 0.005,
+    "gripper_base": 0.005,
+    "camera_flange": 0.005,
+    "gripper_left2": 0.0,
+    "gripper_right2": 0.0,
+}
+"""Per-link table clearance [m] below which the clearance term charges.
+
+The wrist, gripper body and camera flange carry hull colliders and keep 5 mm
+off the table. The finger links have no colliders -- their convex hulls would
+reach into the space the cube occupies between the pads -- so they are only
+kept from sinking below it.
+"""
+FLOOR_CLEARANCE_SCALE = 0.005
+"""Depth [m] that costs one unit, so a link resting on the table costs 1."""
+FLOOR_CLEARANCE_WEIGHT = -20.0
+"""Per-second cost of one link resting on the table, against +15 for a lifted cube."""
+
 GRIPPER_MARKER_SCALE = 0.05
 """Debug marker size [m]; the Isaac Lab default of 0.5 m dwarfs this robot."""
 
@@ -85,7 +123,12 @@ class MyCobotCubeLiftEnvCfg(LiftEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        self.scene.robot = MYCOBOT_280_JN_LIFT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        # Episodes start straight up like the physical arm; actions are offsets
+        # from the grasp-ready LIFT_HOME_POSE, so reaching the cube needs no large action.
+        self.scene.robot = MYCOBOT_280_JN_LIFT_CFG.replace(
+            prim_path="{ENV_REGEX_NS}/Robot",
+            init_state=MYCOBOT_280_JN_LIFT_CFG.init_state.replace(joint_pos={**LIFT_START_POSE, **PARALLEL_OPEN}),
+        )
         self.scene.env_spacing = 0.6
 
         # -- joints the policy sees and is penalised on: the six arm joints plus
@@ -100,7 +143,17 @@ class MyCobotCubeLiftEnvCfg(LiftEnvCfg):
             asset_name="robot",
             joint_names=MYCOBOT_ARM_JOINTS,
             scale=JOINT_ACTION_SCALE,
-            use_default_offset=True,
+            use_default_offset=False,
+            offset=dict(LIFT_HOME_POSE),
+        )
+        self.events.reset_robot_joints = EventTerm(
+            func=mdp.reset_joints_by_offset,
+            mode="reset",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=MYCOBOT_ARM_JOINTS),
+                "position_range": (-START_JOINT_NOISE, START_JOINT_NOISE),
+                "velocity_range": (0.0, 0.0),
+            },
         )
         # One binary command drives both sliding fingers, mirrored. Nothing
         # follows by constraint: the two are siblings off gripper_base, which is
@@ -168,6 +221,16 @@ class MyCobotCubeLiftEnvCfg(LiftEnvCfg):
         self.rewards.grasping_object.params["closed_above"] = GRIPPER_CLOSED_BELOW
         self.rewards.grasping_object.params["robot_cfg"].joint_names = [MYCOBOT_GRIPPER_COMMAND_JOINTS[0]]
         self.rewards.lifting_object.params["minimal_height"] = LIFT_HEIGHT
+        self.rewards.floor_clearance = RewTerm(
+            func=mdp.LinkFloorClearance,
+            weight=FLOOR_CLEARANCE_WEIGHT,
+            params={
+                "asset_cfg": SceneEntityCfg("robot", body_names=list(FLOOR_CLEARANCE_MARGINS), preserve_order=True),
+                "urdf_path": str(CAMERA_GRIPPER_PARALLEL_URDF),
+                "margins": list(FLOOR_CLEARANCE_MARGINS.values()),
+                "scale": FLOOR_CLEARANCE_SCALE,
+            },
+        )
         self.rewards.object_goal_tracking.params["std"] = GOAL_STD_COARSE
         self.rewards.object_goal_tracking.params["minimal_height"] = LIFT_HEIGHT
         self.rewards.object_goal_tracking_fine_grained.params["std"] = GOAL_STD_FINE
@@ -196,3 +259,71 @@ class MyCobotCubeLiftEnvCfg_PLAY(MyCobotCubeLiftEnvCfg):
         self.scene.num_envs = 16
         self.scene.env_spacing = 0.6
         self.observations.policy.enable_corruption = False
+
+
+CUBE_BOX_CENTER_STD_MAX = 0.01
+"""Per-episode upper bound of the box-centre jitter, in normalized image units.
+
+0.01 is 3.2 px across the 640 px raw width of the external camera."""
+CUBE_BOX_SIZE_STD_MAX = 0.10
+"""Per-episode upper bound of the relative box-size jitter."""
+CUBE_BOX_MISS_MAX = 0.15
+"""Per-episode upper bound of the per-step probability that the detector misses the cube."""
+
+
+@configclass
+class ExternalCameraObservationsCfg:
+    """The actor sees the cube only as the external camera's box; the critic also gets its position."""
+
+    @configclass
+    class PolicyCfg(ObsGroup):
+        """7 + 7 + 6 + 3 + 7 = 30 numbers."""
+
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel, params={"asset_cfg": SceneEntityCfg("robot")})
+        joint_vel = ObsTerm(func=mdp.joint_vel_rel, params={"asset_cfg": SceneEntityCfg("robot")})
+        object_box = ObsTerm(
+            func=mdp.ExternalCubeBox,
+            params={
+                "cube_size": CUBE_SIZE,
+                "center_std_max": CUBE_BOX_CENTER_STD_MAX,
+                "size_std_max": CUBE_BOX_SIZE_STD_MAX,
+                "miss_max": CUBE_BOX_MISS_MAX,
+            },
+        )
+        target_position = ObsTerm(func=mdp.position_command, params={"command_name": "object_pose"})
+        actions = ObsTerm(func=mdp.last_action)
+
+        def __post_init__(self):
+            self.enable_corruption = True
+            self.concatenate_terms = True
+
+    @configclass
+    class CriticCfg(ObsGroup):
+        """Training-only privileged state appended to the policy group for the value function."""
+
+        object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame)
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    policy: PolicyCfg = PolicyCfg()
+    critic: CriticCfg = CriticCfg()
+
+
+@configclass
+class MyCobotCubeLiftExtCamEnvCfg(MyCobotCubeLiftEnvCfg):
+    """Cube lift where the policy locates the cube only through the fixed external camera."""
+
+    observations: ExternalCameraObservationsCfg = ExternalCameraObservationsCfg()
+
+
+@configclass
+class MyCobotCubeLiftExtCamEnvCfg_PLAY(MyCobotCubeLiftExtCamEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 16
+        self.scene.env_spacing = 0.6
+        self.observations.policy.enable_corruption = False
+        for name in ("center_std_max", "size_std_max", "miss_max"):
+            self.observations.policy.object_box.params[name] = 0.0

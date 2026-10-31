@@ -26,6 +26,8 @@ class VisualAlignSceneCfg(InteractiveSceneCfg):
     robot: ArticulationCfg = MISSING
     target: RigidObjectCfg = MISSING
     camera: TiledCameraCfg = MISSING
+    external_camera: TiledCameraCfg | None = None
+    """Optional fixed third-person camera; it never feeds the policy."""
     ground = AssetBaseCfg(
         prim_path="/World/ground",
         spawn=sim_utils.GroundPlaneCfg(),

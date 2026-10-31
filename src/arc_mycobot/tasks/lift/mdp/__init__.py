@@ -22,4 +22,5 @@ from isaaclab_tasks.manager_based.manipulation.lift.mdp import (  # noqa: F401
 
 from arc_mycobot.tasks.reach.mdp.observations import position_command  # noqa: F401
 
-from .rewards import grasping_object  # noqa: F401
+from .observations import ExternalCubeBox  # noqa: F401
+from .rewards import LinkFloorClearance, grasping_object  # noqa: F401

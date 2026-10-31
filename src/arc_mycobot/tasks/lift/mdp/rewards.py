@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""The one reward term this task needs that Isaac Lab's lift package does not have."""
+"""Reward terms this task needs that Isaac Lab's lift package does not have."""
 
 from __future__ import annotations
 
@@ -10,13 +10,16 @@ from typing import TYPE_CHECKING
 
 import torch
 from isaaclab.assets import Articulation, RigidObject
-from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import ManagerTermBase, SceneEntityCfg
 from isaaclab.sensors import FrameTransformer
+from isaaclab.utils.math import quat_apply
+
+from arc_mycobot.kinematics.link_geometry import link_hull_points
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
-__all__ = ["grasping_object"]
+__all__ = ["LinkFloorClearance", "grasping_object"]
 
 
 def grasping_object(
@@ -61,3 +64,49 @@ def grasping_object(
     driver = robot.data.joint_pos[:, robot_cfg.joint_ids[0]]  # type: ignore[index]
     closed = (driver > closed_above).float()
     return near * closed
+
+
+class LinkFloorClearance(ManagerTermBase):
+    """Penalty for link hulls coming closer to the table than their own margin.
+
+    Returns ``sum(max(margin_i - lowest_z_i, 0)) / scale`` over the configured
+    links, so with ``scale`` equal to a 5 mm margin a link resting on the table
+    costs 1. The wrist, gripper body and camera flange carry colliders and
+    keep a clearance margin: touching the table is contact a real camera should
+    never make. The finger links have no colliders and margin 0, so only
+    sinking below the table is penalized. Heights are measured in each
+    environment's frame, whose z = 0 is the work surface the robot stands on.
+    """
+
+    def __init__(self, cfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        asset_cfg: SceneEntityCfg = cfg.params["asset_cfg"]
+        names = list(asset_cfg.body_names)
+        if len(cfg.params["margins"]) != len(names):
+            raise ValueError("one clearance margin per link is required")
+        self.margins = torch.tensor(cfg.params["margins"], dtype=torch.float32, device=env.device)
+        geometry = link_hull_points(names, cfg.params["urdf_path"])
+        count = max(len(points) for points in geometry.values())
+        self.points = torch.zeros((len(names), count, 3), device=env.device)
+        self.valid = torch.zeros((len(names), count), dtype=torch.bool, device=env.device)
+        for index, name in enumerate(names):
+            points = torch.as_tensor(geometry[name], dtype=torch.float32, device=env.device)
+            self.points[index, : len(points)] = points
+            self.valid[index, : len(points)] = True
+
+    def lowest(self, env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+        """``(num_envs, links)`` lowest hull height above the work surface [m]."""
+        robot: Articulation = env.scene[asset_cfg.name]
+        position = robot.data.body_pos_w[:, asset_cfg.body_ids] - env.scene.env_origins[:, None, :]
+        rotation = robot.data.body_quat_w[:, asset_cfg.body_ids]
+        count = self.points.shape[1]
+        world = quat_apply(
+            rotation[:, :, None, :].expand(-1, -1, count, -1), self.points[None].expand(env.num_envs, -1, -1, -1)
+        )
+        heights = world[..., 2] + position[:, :, None, 2]
+        return torch.where(self.valid[None], heights, torch.inf).amin(dim=2)
+
+    def __call__(
+        self, env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, urdf_path: str, margins: list[float], scale: float
+    ) -> torch.Tensor:
+        return (self.margins - self.lowest(env, asset_cfg)).clamp(min=0.0).sum(dim=1) / scale

@@ -17,11 +17,17 @@ HF_REPO = "arclab-kmu/arc-mycobot-yolo-hand-policy"
 HF_REVISION = "main"
 CHECKPOINT_NAME = "arc-mycobot-yolo-hand-policy.pt"
 CHECKPOINT_SHA256 = "b38c11966cba9985add2e46c0d3877479b50206b9593d81f2fdf28adc18a7a56"
-YOLO_NAME = "yolov8n-oiv7.pt"
+# Public one-class `hand` YOLOv8n from ADetailer (Apache-2.0 card), pinned by commit and hash.
+YOLO_HF_REPO = "Bingsu/adetailer"
+YOLO_HF_REVISION = "53cc19de382014514d9d4038601d261a7faa9b7b"
+YOLO_HF_FILE = "hand_yolov8n.pt"
+YOLO_SHA256 = "3991202eb69e9ddcb3b9ba80cdeb41e734ffaf844403d6c9f47d515cd88c6f29"
+HAND_CLASS_NAMES = ("hand", "human hand")
 HAND_CLASS = 267
 IMAGE_SIZE = 320
 MIN_CONFIDENCE = 0.05
 FINETUNED_MIN_CONFIDENCE = 0.25
+HUB_HAND_MIN_CONFIDENCE = 0.4
 RAW_DETECTION_CONFIDENCE = 0.05
 LOWEST_CONFIDENCE = 0.01
 BOX_FILTER_ALPHA = 0.4
@@ -58,7 +64,7 @@ def verify_checkpoint(path, expected_sha256=CHECKPOINT_SHA256):
             digest.update(chunk)
     actual = digest.hexdigest()
     if actual != expected_sha256:
-        raise ValueError(f"checkpoint SHA-256 mismatch: expected {expected_sha256}, got {actual}")
+        raise ValueError(f"{Path(path).name} SHA-256 mismatch: expected {expected_sha256}, got {actual}")
 
 
 def build_actor(checkpoint_path, device="cpu"):
@@ -121,13 +127,21 @@ def hand_confidence_from_results(results, hand_class, min_confidence=MIN_CONFIDE
 
 
 def default_yolo_weights():
+    """Local override, or the pinned Hub hand detector hashed before its pickle is loaded."""
     override = os.environ.get("ARC_MYCOBOT_YOLO_WEIGHTS")
     if override:
         return override
-    cache_root = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache")))
-    path = cache_root / "arc-mycobot" / "weights" / YOLO_NAME
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return str(path)
+    from huggingface_hub import hf_hub_download
+
+    path = hf_hub_download(repo_id=YOLO_HF_REPO, filename=YOLO_HF_FILE, revision=YOLO_HF_REVISION)
+    verify_checkpoint(path, YOLO_SHA256)
+    return path
+
+
+def default_confidence(hand_class, class_name):
+    if class_name == "hand":
+        return HUB_HAND_MIN_CONFIDENCE
+    return FINETUNED_MIN_CONFIDENCE if hand_class == 0 else MIN_CONFIDENCE
 
 
 class HandPolicyRuntime:
@@ -137,12 +151,14 @@ class HandPolicyRuntime:
         self.device = str(device)
         self.actor = build_actor(checkpoint_path, self.device)
         self.detector = YOLO(yolo_weights or default_yolo_weights())
-        hand_classes = [key for key, name in self.detector.names.items() if name.lower() == "human hand"]
+        hand_classes = [key for key, name in self.detector.names.items() if name.lower() in HAND_CLASS_NAMES]
         if len(hand_classes) != 1:
-            raise ValueError("YOLO weights must have exactly one Human hand class")
+            raise ValueError("YOLO weights must have exactly one hand or Human hand class")
         self.hand_class = hand_classes[0]
-        default_confidence = FINETUNED_MIN_CONFIDENCE if self.hand_class == 0 else MIN_CONFIDENCE
-        self.min_confidence = default_confidence if yolo_confidence is None else float(yolo_confidence)
+        if yolo_confidence is None:
+            self.min_confidence = default_confidence(self.hand_class, self.detector.names[self.hand_class])
+        else:
+            self.min_confidence = float(yolo_confidence)
         if not LOWEST_CONFIDENCE <= self.min_confidence <= 1.0:
             raise ValueError("YOLO confidence must be between 0.01 and 1.0")
         self._filtered_box = None

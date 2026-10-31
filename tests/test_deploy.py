@@ -325,7 +325,7 @@ def test_bad_start_pose_sends_no_command():
         def read_joints(self, retry_s):
             return SimpleNamespace(angles=[20, 0, 0, 0, 0, -45])
 
-    with pytest.raises(UnsafeTarget, match="start near"):
+    with pytest.raises(UnsafeTarget, match="start near.*measured J1=20.0, J2=0.0"):
         run_camera(args(True), FakeRuntime(), lambda **kw: SimpleNamespace(**kw), BadPoseArm, FakeCamera)
     arm = FakeArm.last
     assert arm is not None
@@ -556,6 +556,58 @@ def test_runtime_filters_box_jumps_and_logs_subthreshold_confidence(monkeypatch)
     assert predictions[2].policy_box == (0, 0, 0, 0, 0)
 
 
+@pytest.mark.parametrize(
+    ("names", "hand_class", "confidence"),
+    [({0: "hand"}, 0, 0.4), ({0: "Human hand"}, 0, 0.25), ({165: "Door handle", 267: "Human hand"}, 267, 0.05)],
+)
+def test_runtime_accepts_public_hand_and_legacy_human_hand_classes(monkeypatch, names, hand_class, confidence):
+    import deploy.runtime as deploy_runtime
+
+    detector = types.SimpleNamespace(names=names)
+    monkeypatch.setitem(sys.modules, "ultralytics", types.SimpleNamespace(YOLO=lambda _weights: detector))
+    monkeypatch.setattr(deploy_runtime, "build_actor", lambda *_args: None)
+    runtime = HandPolicyRuntime("unused", yolo_weights="unused")
+    assert runtime.hand_class == hand_class
+    assert runtime.min_confidence == confidence
+
+
+def test_runtime_rejects_detector_without_hand_class(monkeypatch):
+    import deploy.runtime as deploy_runtime
+
+    detector = types.SimpleNamespace(names={0: "person"})
+    monkeypatch.setitem(sys.modules, "ultralytics", types.SimpleNamespace(YOLO=lambda _weights: detector))
+    monkeypatch.setattr(deploy_runtime, "build_actor", lambda *_args: None)
+    with pytest.raises(ValueError, match="hand or Human hand"):
+        HandPolicyRuntime("unused", yolo_weights="unused")
+
+
+def test_default_hand_detector_is_pinned_and_hashed_before_loading(monkeypatch, tmp_path):
+    import hashlib
+
+    import deploy.runtime as deploy_runtime
+
+    weights = tmp_path / "hand_yolov8n.pt"
+    weights.write_bytes(b"hub weights")
+    calls = []
+
+    def fake_download(**kwargs):
+        calls.append(kwargs)
+        return str(weights)
+
+    monkeypatch.delenv("ARC_MYCOBOT_YOLO_WEIGHTS", raising=False)
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", fake_download)
+    with pytest.raises(ValueError, match="hand_yolov8n.pt SHA-256 mismatch"):
+        deploy_runtime.default_yolo_weights()
+    assert calls == [
+        {"repo_id": "Bingsu/adetailer", "filename": "hand_yolov8n.pt", "revision": deploy_runtime.YOLO_HF_REVISION}
+    ]
+    monkeypatch.setattr(deploy_runtime, "YOLO_SHA256", hashlib.sha256(b"hub weights").hexdigest())
+    assert deploy_runtime.default_yolo_weights() == str(weights)
+    monkeypatch.setenv("ARC_MYCOBOT_YOLO_WEIGHTS", "/local/best.pt")
+    assert deploy_runtime.default_yolo_weights() == "/local/best.pt"
+    assert len(calls) == 2
+
+
 def test_pose_labels_become_one_class_boxes_without_following_source_labels(tmp_path):
     pose = tmp_path / "pose"
     output = tmp_path / "detect"
@@ -574,6 +626,14 @@ def test_pose_labels_become_one_class_boxes_without_following_source_labels(tmp_
 
 
 def test_deploy_source_parses_as_python_38():
-    for name in ("runtime.py", "controller.py", "arm.py", "preview.py", "run.py", "train_hand_detector.py"):
+    for name in (
+        "runtime.py",
+        "controller.py",
+        "arm.py",
+        "preview.py",
+        "run.py",
+        "train_hand_detector.py",
+        "calibrate_camera.py",
+    ):
         source = (Path(__file__).resolve().parents[1] / "deploy" / name).read_text()
         ast.parse(source, filename=name, feature_version=(3, 8))

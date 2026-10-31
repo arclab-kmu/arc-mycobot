@@ -52,8 +52,9 @@ def annotated_frame(rgb, prediction, mode, observation_age_s):
 class BrowserPreview:
     """Serve only the latest annotated JPEG on 127.0.0.1."""
 
-    def __init__(self, port):
+    def __init__(self, port, page=PAGE):
         self.port = port
+        self.page = page
         self._jpeg = None
         self._lock = threading.Lock()
         self._server = None
@@ -66,7 +67,7 @@ class BrowserPreview:
             def do_GET(self):
                 path = self.path.split("?", 1)[0]
                 if path == "/":
-                    body, content_type, status = PAGE, "text/html; charset=utf-8", 200
+                    body, content_type, status = preview.page, "text/html; charset=utf-8", 200
                 elif path == "/frame.jpg":
                     with preview._lock:
                         body = preview._jpeg
@@ -93,7 +94,9 @@ class BrowserPreview:
         return f"http://127.0.0.1:{self._server.server_port}"
 
     def publish(self, rgb, prediction, mode, observation_age_s):
-        frame = annotated_frame(rgb, prediction, mode, observation_age_s)
+        self.publish_bgr(annotated_frame(rgb, prediction, mode, observation_age_s))
+
+    def publish_bgr(self, frame):
         ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
         if not ok:
             raise RuntimeError("could not encode browser preview frame")

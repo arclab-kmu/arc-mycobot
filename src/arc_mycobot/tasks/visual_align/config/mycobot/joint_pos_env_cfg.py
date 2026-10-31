@@ -16,6 +16,24 @@ from arc_mycobot.assets.robots.mycobot_280 import (
 )
 from arc_mycobot.assets.targets import HAND_PHOTO_USD
 from arc_mycobot.tasks.visual_align.visual_align_env_cfg import EventCfg, VisualAlignEnvCfg
+from arc_mycobot.vision.camera_calibration import CameraCalibration, external_camera_calibration
+
+
+def external_camera_cfg(calibration: CameraCalibration) -> TiledCameraCfg:
+    """Fixed camera in each environment's robot-base frame from a measured calibration."""
+    return TiledCameraCfg(
+        prim_path="{ENV_REGEX_NS}/ExternalCamera",
+        offset=TiledCameraCfg.OffsetCfg(pos=calibration.position_m, rot=calibration.quaternion_wxyz, convention="ros"),
+        data_types=["rgb"],
+        spawn=sim_utils.PinholeCameraCfg.from_intrinsic_matrix(
+            intrinsic_matrix=list(calibration.intrinsic_matrix),
+            width=calibration.width,
+            height=calibration.height,
+            clipping_range=(0.02, 1.5),
+        ),
+        width=calibration.width,
+        height=calibration.height,
+    )
 
 
 @configclass
@@ -177,3 +195,17 @@ class MyCobotYoloHandDomainRandEnvCfg_PLAY(MyCobotYoloHandDomainRandEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.scene.num_envs = 8
+
+
+@configclass
+class MyCobotYoloHandDomainRandEnvCfg_VIEW(MyCobotYoloHandDomainRandEnvCfg_PLAY):
+    """One environment seen by the real external camera's calibrated pose and lens."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 1
+        calibration = external_camera_calibration()
+        self.scene.external_camera = external_camera_cfg(calibration)
+        # The GUI viewport cannot roll or copy intrinsics; it only starts from the same viewpoint.
+        self.viewer.eye = calibration.position_m
+        self.viewer.lookat = calibration.look_at()

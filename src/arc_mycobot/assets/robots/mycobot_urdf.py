@@ -81,6 +81,7 @@ __all__ = [
     "GRIPPER_VELOCITY_LIMIT",
     "HOME_POSE",
     "LIFT_HOME_POSE",
+    "LIFT_START_POSE",
     "MYCOBOT_ROS2_DIR",
     "ROOT_LINK",
     "SOURCE_URDF",
@@ -395,12 +396,31 @@ LIFT_HOME_POSE = {
     "joint4_to_joint3": -2.5084,
     "joint5_to_joint4": -0.1863,
     "joint6_to_joint5": -2.3629,
-    "joint6output_to_joint6": 2.3146,
+    "joint6output_to_joint6": -0.8270,
 }
-"""Lift reset posture [rad]. J6 compensates the camera mount's +45 degree roll.
+"""Lift grasp-ready posture [rad], used as the lift action offset.
 
 The parallel pads face the cube at this pose. The jaw centre is near
-``(0.237, 0.0, 0.089)`` m in the root frame; the lift cube starts below it.
+``(0.237, 0.0, 0.088)`` m in the root frame; the lift cube starts below it.
+J6 was 2.3146 until 2026-10-07. Turning it by -pi keeps the jaw centre and its
+closing line (the jaw is symmetric) but moves the camera from below the gripper
+(``camera_link`` 47 mm above the table) to above it (130 mm), so lowering the
+jaw onto the cube no longer drives the camera into the table. -47.4 deg is also
+within 2.4 deg of the real arm's -45 deg start.
+"""
+
+LIFT_START_POSE = {
+    "joint2_to_joint1": 0.0,
+    "joint3_to_joint2": 0.0,
+    "joint4_to_joint3": 0.0,
+    "joint5_to_joint4": 0.0,
+    "joint6_to_joint5": 0.0,
+    "joint6output_to_joint6": -0.7853981633974483,
+}
+"""Lift episode start [rad]: the physical arm's straight-up pose, J6 at -45 deg.
+
+Lift episodes reset here and then drive toward :data:`LIFT_HOME_POSE`, the
+action offset; the policy does not need large actions to reach the cube.
 """
 
 _GRIPPER_JOINTS = (

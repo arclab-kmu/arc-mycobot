@@ -63,3 +63,13 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:MyCobotYoloHandDomainRandPPORunnerCfg",
     },
 )
+
+gym.register(
+    id="Isaac-Visual-Align-YOLO-Hand-DR-MyCobot280JN-View-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.joint_pos_env_cfg:MyCobotYoloHandDomainRandEnvCfg_VIEW",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:MyCobotYoloHandDomainRandPPORunnerCfg",
+    },
+)

@@ -20,12 +20,15 @@ import arc_mycobot.tasks  # noqa: F401  (registers the environments)
 TASKS = [
     "Isaac-Reach-MyCobot280JN-v0",
     "Isaac-Reach-MyCobot280JN-Play-v0",
+    "Isaac-Lift-Cube-ExtCam-MyCobot280JN-v0",
+    "Isaac-Lift-Cube-ExtCam-MyCobot280JN-Play-v0",
     "Isaac-Visual-Align-MyCobot280JN-v0",
     "Isaac-Visual-Align-MyCobot280JN-Play-v0",
     "Isaac-Visual-Align-YOLO-Hand-MyCobot280JN-v0",
     "Isaac-Visual-Align-YOLO-Hand-MyCobot280JN-Play-v0",
     "Isaac-Visual-Align-YOLO-Hand-DR-MyCobot280JN-v0",
     "Isaac-Visual-Align-YOLO-Hand-DR-MyCobot280JN-Play-v0",
+    "Isaac-Visual-Align-YOLO-Hand-DR-MyCobot280JN-View-v0",
 ]
 
 

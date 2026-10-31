@@ -50,10 +50,13 @@ class TargetSmoother:
 def check_start(angles_deg, limits=Limits()):
     if len(angles_deg) != 6 or not all(math.isfinite(float(x)) for x in angles_deg):
         raise UnsafeTarget("six finite joint angles are required")
+    measured = ", ".join(f"J{index + 1}={float(x):.1f}" for index, x in enumerate(angles_deg))
     if any(abs(float(x)) > limits.start_degrees for x in angles_deg[:5]):
-        raise UnsafeTarget("J1-J5 must start near the trained zero pose")
+        raise UnsafeTarget(
+            f"J1-J5 must start near the trained zero pose (within {limits.start_degrees:g} deg); measured {measured}"
+        )
     if abs(float(angles_deg[5]) + 45.0) > limits.wrist_tolerance_degrees:
-        raise UnsafeTarget("J6 must already be near -45 degrees")
+        raise UnsafeTarget(f"J6 must already be near -45 degrees; measured {measured}")
 
 
 def plan_target(prediction, measured_deg, limits=Limits()):

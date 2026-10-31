@@ -236,7 +236,7 @@ def cli():
     parser.add_argument("--hf-repo", default=HF_REPO)
     parser.add_argument("--hf-revision", default=HF_REVISION)
     parser.add_argument("--hf-file", default=CHECKPOINT_NAME)
-    parser.add_argument("--yolo-weights", help="local YOLO weights; default is XDG cache")
+    parser.add_argument("--yolo-weights", help="local YOLO weights; default is the pinned Hub hand detector")
     parser.add_argument("--yolo-confidence", type=float, help="hand detection threshold; log shows best confidence")
     parser.add_argument(
         "--angles-deg", type=float, nargs=6, default=[0, 0, 0, 0, 0, -45], help="offline-image pose only"
