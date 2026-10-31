@@ -1,6 +1,6 @@
 [project]
 name = "arc-mycobot"
-version = "0.1.0"
+version = "1.0.0"
 description = "Isaac Lab reach, cube-lift and RGB visual-alignment tasks for the myCobot 280 JetsonNano."
 readme = "README.md"
 requires-python = "==3.11.*"
